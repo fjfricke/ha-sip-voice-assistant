@@ -29,11 +29,10 @@ COPY app/ /app/app/
 COPY config/ /app/config/
 
 # Copy run script
-COPY addon/run.sh /run.sh
+COPY run.sh /run.sh
 
 # Set permissions
 RUN chmod a+x /run.sh
 
 # Run the application
 CMD ["/run.sh"]
-

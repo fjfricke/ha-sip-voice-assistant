@@ -222,7 +222,7 @@ class CallSession:
                 # Add PIN parameter (optional - OpenAI will prompt if missing)
                 tool_def["parameters"]["properties"]["pin"] = {
                     "type": "string",
-                    "description": "Voice PIN code for authentication. The user will say this verbally.",
+                    "description": "Voice PIN code for authentication. The user will say this verbally. The PIN can be any length and will be spoken as digits (e.g., 'one one eight three three' for a 5-digit PIN).",
                 }
                 # PIN is not required in the schema - OpenAI will ask if missing
                 # This allows OpenAI to handle the PIN request flow naturally
@@ -255,7 +255,7 @@ class CallSession:
 IMPORTANT: Some tools require PIN authentication. When calling a tool that requires a PIN:
 1. If the PIN parameter is missing from the tool call arguments, ask the user: "Please provide your PIN code to proceed."
 2. The user will speak their PIN code verbally.
-3. Extract the PIN from what the user says (it might be digits like "1234" or spelled out like "one two three four").
+3. Extract the PIN from what the user says. The PIN can be any length (not necessarily 4 digits) and might be spoken as digits (e.g., "one one eight three three") or as a number sequence.
 4. Call the tool again with the PIN included in the arguments.
 5. If the PIN is incorrect, inform the user and ask them to try again.
 """

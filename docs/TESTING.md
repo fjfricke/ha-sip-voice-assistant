@@ -21,7 +21,7 @@ poetry show
 
 Check that all configuration files exist:
 - `config/callers.yaml` - Caller mappings (includes PINs)
-- `config/tools.yaml` - Tool definitions
+- `config/tools.yaml` - Tool definitions  
 
 ### Step 3: Create Environment File
 

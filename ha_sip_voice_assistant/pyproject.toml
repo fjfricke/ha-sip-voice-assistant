@@ -16,6 +16,7 @@ soundfile = "^0.13.1"
 samplerate = "^0.2.2"
 resampy = "^0.4.3"
 g722 = "^1.2.2"
+python-dotenv = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

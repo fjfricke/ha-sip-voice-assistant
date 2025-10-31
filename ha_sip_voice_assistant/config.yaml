@@ -24,6 +24,8 @@ options:
   openai_model: "gpt-realtime"
   homeassistant_url: "http://supervisor/core"
   homeassistant_token: ""
+  # Note: If homeassistant_token is empty, the addon will try to use
+  # the Supervisor token automatically (SUPERVISOR_TOKEN env var or secrets)
   caller_config_path: "/config/callers.yaml"
   tools_config_path: "/config/tools.yaml"
 schema:
@@ -37,6 +39,7 @@ schema:
   openai_model: str
   homeassistant_url: str
   homeassistant_token: password
+  # Optional: Leave empty to use Supervisor token automatically
   caller_config_path: str
   tools_config_path: str
 

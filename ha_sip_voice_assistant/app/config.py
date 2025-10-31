@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 import yaml
+from dotenv import load_dotenv
 
 
 class Config:
@@ -14,6 +15,16 @@ class Config:
         self.config: Dict[str, Any] = {}
         self.callers: Dict[str, Any] = {}
         self.tools: Dict[str, Any] = {}
+        
+        # Load .env file in standalone mode
+        if not self.is_addon_mode:
+            # Try to load .env from current working directory (ha_sip_voice_assistant/)
+            env_path = Path(".env")
+            if env_path.exists():
+                load_dotenv(env_path)
+                print(f"✅ Loaded .env from {env_path.absolute()}")
+            else:
+                print(f"⚠️  No .env file found at {env_path.absolute()}")
         
     def load(self):
         """Load configuration from addon config or environment variables."""
@@ -33,6 +44,20 @@ class Config:
         """Load configuration from Home Assistant addon options."""
         with open("/data/options.json", "r") as f:
             self.config = json.load(f)
+        
+        # In addon mode, try to use supervisor token if no token is configured
+        # The supervisor automatically injects the token via SUPERVISOR_TOKEN env var
+        if not self.config.get("homeassistant_token"):
+            # The Supervisor token is automatically available as environment variable
+            # in Home Assistant addon containers
+            supervisor_token = os.getenv("SUPERVISOR_TOKEN")
+            
+            if supervisor_token:
+                self.config["homeassistant_token"] = supervisor_token
+                print("✅ Using Supervisor token for Home Assistant API access (no manual token needed)")
+            else:
+                print("⚠️  No Home Assistant token configured and SUPERVISOR_TOKEN not available")
+                print("   Please set homeassistant_token in addon options or ensure addon is running in Supervisor")
     
     def _load_standalone_config(self):
         """Load configuration from environment variables."""
@@ -86,9 +111,15 @@ class Config:
     
     def get_homeassistant_config(self) -> Dict[str, Any]:
         """Get Home Assistant configuration."""
+        token = self.config.get("homeassistant_token", "")
+        
+        # In addon mode, if no token configured, try supervisor token as fallback
+        if not token and self.is_addon_mode:
+            token = os.getenv("SUPERVISOR_TOKEN", "")
+        
         return {
             "url": self.config["homeassistant_url"],
-            "token": self.config["homeassistant_token"],
+            "token": token,
         }
     
     def get_caller_config(self, caller_id: str) -> Optional[Dict[str, Any]]:

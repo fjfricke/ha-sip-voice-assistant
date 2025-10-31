@@ -25,4 +25,3 @@ cd /app || exit 1
 
 # Run the application
 exec python3 -m app.main
-

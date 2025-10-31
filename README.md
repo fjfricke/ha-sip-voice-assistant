@@ -11,6 +11,28 @@ A Home Assistant addon that registers as a SIP device with your FritzBox, handle
 - **PIN Verification**: Optional PIN/password verification for sensitive actions (voice + DTMF support)
 - **Standalone Mode**: Test on your Mac without Home Assistant
 
+## Repository Structure
+
+This repository is structured as a Home Assistant addon repository:
+
+```
+.
+├── repository.json          # Repository metadata (for Add-on Store)
+├── ha_sip_voice_assistant/  # The actual addon
+│   ├── Dockerfile          # Container build instructions
+│   ├── config.yaml         # Addon metadata and options
+│   ├── run.sh              # Startup script
+│   ├── app/                # Application code
+│   ├── config/             # Default configuration files
+│   ├── pyproject.toml      # Python dependencies
+│   └── poetry.lock         # Locked dependencies
+├── docs/                   # Documentation
+├── tests/                  # Test files
+└── README.md               # This file
+```
+
+The `ha_sip_voice_assistant/` directory contains everything needed to build and run the addon. When added as a repository to Home Assistant, the Supervisor automatically detects and can install the addon.
+
 ## Architecture
 
 The addon uses a pure Python asyncio implementation for SIP/RTP, similar to the [sip-to-ai](https://github.com/aicc2025/sip-to-ai) project. Audio flows bidirectionally:
@@ -22,51 +44,115 @@ The addon uses a pure Python asyncio implementation for SIP/RTP, similar to the 
 
 ### As Home Assistant Addon
 
-1. Copy the `addon` directory to your Home Assistant addons folder (typically `/config/addons/ha_sip_voice_assistant/`)
+#### Option A: Add Repository to Addon Store (Recommended)
 
-2. Configure the addon in Home Assistant:
-   - Go to Settings → Add-ons → HA SIP Voice Assistant
-   - Configure SIP credentials, OpenAI API key, and Home Assistant token
+1. **Add this repository to Home Assistant:**
+   - Go to **Settings → Add-ons → Add-on Store**
+   - Click the three dots (⋮) in the top right corner
+   - Select **"Repositories"**
+   - Add the repository URL:
+     ```
+     https://github.com/yourusername/ha-sip-voice-assistant
+     ```
+   - Or if using a local repository:
+     ```
+     https://your-server.com/path/to/repo
+     ```
+   - Click **"Add"**
+
+2. **Install the addon:**
+   - The addon should now appear in the Add-on Store
+   - Click on **"HA SIP Voice Assistant"**
+   - Click **"Install"**
+   - Wait for installation to complete
+
+3. **Configure the addon:**
+   - Go to **Settings → Add-ons → HA SIP Voice Assistant**
+   - Click **"Configuration"**
+   - Configure SIP credentials and OpenAI API key
+   - **Note:** Home Assistant token is optional - the addon will automatically use the Supervisor token if not provided
    - Update configuration file paths if needed
 
-3. Create configuration files in `/config`:
-   - `callers.yaml` - Caller mappings (languages, instructions, tools, PINs)
-   - `tools.yaml` - Tool definitions (HA services, PIN requirements)
+4. **Create configuration files in Home Assistant:**
+   
+   **Option A: Via File Editor (Recommended)**
+   - Go to Settings → File Editor (or Developer Tools → File Editor)
+   - Navigate to `/config` directory
+   - Create `callers.yaml` - Caller mappings (languages, instructions, tools, PINs)
+   - Create `tools.yaml` - Tool definitions (HA services, PIN requirements)
+   
+   **Option B: Via Samba/SSH**
+   - Access your Home Assistant `/config` directory via Samba or SSH
+   - Create the files directly: `callers.yaml` and `tools.yaml`
+   
+   **Important:** These files must be in the Home Assistant `/config` directory (same location as `configuration.yaml`).
+   The addon reads from `/config/callers.yaml` and `/config/tools.yaml` (as configured in addon options).
+   
+   **Default configs:** If the files don't exist when the addon starts, it will copy default templates from the Docker image.
+   However, you should customize these files with your actual caller numbers, tools, and PINs.
+   
+   See `docs/ADDON_CONFIG.md` for detailed instructions on creating and managing these files.
 
-4. Start the addon
+5. **Start the addon:**
+   - Go back to the addon page
+   - Click **"Start"**
+   - Check the logs to verify SIP registration
+
+#### Option B: Manual Installation (Legacy)
+
+If you prefer to install manually:
+
+1. Copy the `ha_sip_voice_assistant` directory to your Home Assistant addons folder:
+   ```bash
+   scp -r ha_sip_voice_assistant/ homeassistant@your-ha-ip:/config/addons/ha_sip_voice_assistant/
+   ```
+
+2. Restart Home Assistant Supervisor
+
+3. The addon should appear in **Settings → Add-ons** → **Local Add-ons**
+
+4. Continue with configuration steps above (steps 3-5)
 
 ### Standalone Mode (for Mac Testing)
 
-1. Install Poetry if you haven't already:
+**All work is done from the `ha_sip_voice_assistant/` directory.** This is your working directory.
+
+1. **Navigate to the addon directory:**
+```bash
+cd ha_sip_voice_assistant
+```
+
+2. **Install Poetry if you haven't already:**
 ```bash
 curl -sSL https://install.python-poetry.org | python3 -
 ```
 
-2. Install dependencies and create virtual environment:
+3. **Install dependencies:**
 ```bash
 poetry install
 ```
 
-3. Activate the virtual environment:
-```bash
-poetry shell
-```
-
-Or run commands with `poetry run`:
-```bash
-poetry run python -m app.main
-```
-
-4. Create a `.env` file:
+4. **Create a `.env` file:**
 ```bash
 cp .env.example .env
 # Edit .env with your configuration
 ```
 
-3. Run the application:
+5. **Run the application:**
 ```bash
+poetry run python -m app.main
+```
+
+Or activate the virtual environment and run normally:
+```bash
+poetry shell
 python -m app.main
 ```
+
+**Working Directory:**
+- All Poetry commands (`poetry install`, `poetry run`, `poetry shell`) should be run from `ha_sip_voice_assistant/`
+- The `.env` file should be in `ha_sip_voice_assistant/.env`
+- The application automatically loads `.env` when running in standalone mode
 
 ## Configuration
 
@@ -79,7 +165,7 @@ python -m app.main
 - `OPENAI_API_KEY` - OpenAI API key
 - `OPENAI_MODEL` - Model name (default: `gpt-realtime`)
 - `HOMEASSISTANT_URL` - Home Assistant URL (addon: `http://supervisor/core`, standalone: your HA URL)
-- `HOMEASSISTANT_TOKEN` - Long-lived access token
+- `HOMEASSISTANT_TOKEN` - Long-lived access token (optional in addon mode - will use Supervisor token if not provided)
 - `CALLER_CONFIG_PATH` - Path to callers.yaml
 - `TOOLS_CONFIG_PATH` - Path to tools.yaml
 
