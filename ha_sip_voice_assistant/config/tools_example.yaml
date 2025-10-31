@@ -1,0 +1,14 @@
+tools:
+  example_tool_1:
+    description: "Example tool 1 - Open a door. This action requires PIN authentication."
+    ha_service: "script.example_open_door"
+    requires_pin: true
+    parameters: {}
+  
+  example_tool_2:
+    description: "Example tool 2 - Control a light. This action does not require PIN authentication."
+    ha_service: "light.turn_on"
+    requires_pin: false
+    parameters:
+      entity_id: "light.example_light"
+      brightness: 255

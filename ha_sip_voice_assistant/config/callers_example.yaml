@@ -1,0 +1,22 @@
+callers:
+  "+1234567890":
+    language: "en"
+    instructions: |
+      You are a helpful AI assistant for home automation. 
+      Be concise and friendly. When the user asks to control devices, 
+      use the available tools.
+      
+      Start the conversation by saying: "Hello, how can I help you today?"
+    available_tools: ["example_tool_1", "example_tool_2"]
+    pin: null  # No PIN configured for this caller
+  
+  "+0987654321":
+    language: "de"
+    instructions: |
+      Du bist ein hilfreicher KI-Assistent für die Hausautomatisierung.
+      Sei präzise und freundlich.
+      Wenn der Benutzer Geräte steuern möchte, nutze die verfügbaren Tools.
+      
+      Starte das Gespräch mit: "Hallo, wie kann ich dir heute helfen?"
+    available_tools: ["example_tool_1", "example_tool_2"]
+    pin: null  # Beispiel PIN: "1234" (nicht für Produktion verwenden)

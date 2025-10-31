@@ -43,4 +43,10 @@ logs/
 .DS_Store
 Thumbs.db
 
+# User config directories - ignore everything
 config/*
+
+# Allow template/example config files in ha_sip_voice_assistant/config/ to be tracked
+# These are safe example templates without real sensitive data
+!ha_sip_voice_assistant/config/callers_example.yaml
+!ha_sip_voice_assistant/config/tools_example.yaml

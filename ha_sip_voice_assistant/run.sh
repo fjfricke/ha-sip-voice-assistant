@@ -8,14 +8,14 @@ mkdir -p /config
 
 # Copy default configs if they don't exist
 if [ ! -f /config/callers.yaml ]; then
-    if [ -f /app/config/callers.yaml ]; then
-        cp /app/config/callers.yaml /config/callers.yaml
+    if [ -f /app/config/callers_example.yaml ]; then
+        cp /app/config/callers_example.yaml /config/callers.yaml
     fi
 fi
 
 if [ ! -f /config/tools.yaml ]; then
-    if [ -f /app/config/tools.yaml ]; then
-        cp /app/config/tools.yaml /config/tools.yaml
+    if [ -f /app/config/tools_example.yaml ]; then
+        cp /app/config/tools_example.yaml /config/tools.yaml
     fi
 fi
 
