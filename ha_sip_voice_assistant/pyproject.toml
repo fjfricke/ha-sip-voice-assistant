@@ -14,7 +14,7 @@ pyyaml = "^6.0"
 g711 = "^1.6.5"
 soundfile = "^0.13.1"
 samplerate = "^0.2.2"
-resampy = "^0.4.3"
+scipy = "^1.14.0"
 g722 = "^1.2.2"
 python-dotenv = "^1.0.0"
 

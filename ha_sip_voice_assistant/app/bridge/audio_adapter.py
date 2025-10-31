@@ -1,7 +1,7 @@
-"""Audio adapter - resampling dynamically based on SIP codec ↔ 24kHz with resampy."""
+"""Audio adapter - resampling dynamically based on SIP codec ↔ 24kHz with scipy."""
 import asyncio
 import numpy as np
-import resampy
+from scipy import signal
 from typing import Optional
 
 # OpenAI sample rate
@@ -44,9 +44,10 @@ class AudioAdapter:
             if len(audio_sip) != expected_size:
                 print(f"⚠️  Unexpected frame size: expected {expected_size} bytes, got {len(audio_sip)}")
             
-            # Resample SIP sample rate to 24kHz using resampy library
+            # Resample SIP sample rate to 24kHz using scipy.signal.resample
             samples_sip = np.frombuffer(audio_sip, dtype=np.int16).astype(np.float32) / 32768.0
-            samples_24k = resampy.resample(samples_sip, self.sip_sample_rate, OPENAI_SAMPLE_RATE)
+            num_samples_24k = int(len(samples_sip) * OPENAI_SAMPLE_RATE / self.sip_sample_rate)
+            samples_24k = signal.resample(samples_sip, num_samples_24k)
             
             # Convert back to int16
             audio_24k = (np.clip(samples_24k, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
@@ -63,9 +64,10 @@ class AudioAdapter:
     
     async def send_downlink(self, pcm16_data: bytes):
         """Send audio data from AI (downlink) - expects 24kHz PCM16, resamples to SIP rate."""
-        # Resample 24kHz to SIP sample rate using resampy library
+        # Resample 24kHz to SIP sample rate using scipy.signal.resample
         samples_24k = np.frombuffer(pcm16_data, dtype=np.int16).astype(np.float32) / 32768.0
-        samples_sip = resampy.resample(samples_24k, OPENAI_SAMPLE_RATE, self.sip_sample_rate)
+        num_samples_sip = int(len(samples_24k) * self.sip_sample_rate / OPENAI_SAMPLE_RATE)
+        samples_sip = signal.resample(samples_24k, num_samples_sip)
         
         # Convert back to int16
         audio_sip = (np.clip(samples_sip, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()

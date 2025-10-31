@@ -7,7 +7,7 @@ FROM ${BUILD_FROM}
 WORKDIR /app
 
 # Install Python 3.12 and dependencies
-# Note: LLVM, cmake, g++, make, and musl-dev are needed for building llvmlite (dependency of numba/resampy)
+# Note: scipy and samplerate use pre-built wheels, so we don't need build tools
 RUN apk add --no-cache \
     python3 \
     python3-dev \
@@ -16,16 +16,6 @@ RUN apk add --no-cache \
     py3-setuptools \
     curl \
     git \
-    cmake \
-    make \
-    gcc \
-    g++ \
-    musl-dev \
-    linux-headers \
-    llvm20 \
-    llvm20-dev \
-    llvm20-static \
-    llvm20-gtest \
     libsamplerate \
     libsamplerate-dev \
     py3-pybind11
@@ -39,16 +29,7 @@ COPY pyproject.toml poetry.toml poetry.lock* /app/
 
 # Install dependencies
 WORKDIR /app
-# Set environment variables for build tools (needed for llvmlite compilation)
-# These must be set in the RUN command so Poetry's build process can access them
-ENV CC=gcc
-ENV CXX=g++
-ENV CMAKE_MAKE_PROGRAM=make
-ENV PATH="/usr/bin:$PATH"
-ENV LLVM_DIR=/usr/lib/llvm20/lib/cmake/llvm
-RUN CC=gcc CXX=g++ CMAKE_MAKE_PROGRAM=make LLVM_DIR=/usr/lib/llvm20/lib/cmake/llvm PATH="/usr/bin:$PATH" \
-    poetry config virtualenvs.create false && \
-    CC=gcc CXX=g++ CMAKE_MAKE_PROGRAM=make LLVM_DIR=/usr/lib/llvm20/lib/cmake/llvm PATH="/usr/bin:$PATH" \
+RUN poetry config virtualenvs.create false && \
     poetry install --only=main --no-interaction --no-ansi --no-root
 
 # Copy application files

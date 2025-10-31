@@ -33,9 +33,10 @@ def g711_ulaw_to_pcm16(ulaw_data: bytes, sample_rate: int = 8000) -> bytes:
     # If 16kHz requested, upsample from 8kHz to 16kHz
     # But note: This shouldn't happen for G.711 (it's always 8kHz)
     if sample_rate == 16000:
-        import resampy
+        from scipy import signal
         samples_8k = np.frombuffer(pcm16_8k, dtype=np.int16).astype(np.float32) / 32768.0
-        samples_16k = resampy.resample(samples_8k, 8000, 16000)
+        num_samples_16k = len(samples_8k) * 2  # Double the sample count
+        samples_16k = signal.resample(samples_8k, num_samples_16k)
         pcm16_16k = (np.clip(samples_16k, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
         return pcm16_16k
     
@@ -53,9 +54,10 @@ def pcm16_to_g711_ulaw(pcm16_data: bytes, sample_rate: int = 8000) -> bytes:
     
     # If 16kHz, downsample to 8kHz first
     if sample_rate == 16000:
-        import resampy
+        from scipy import signal
         samples_16k = np.frombuffer(pcm16_data, dtype=np.int16).astype(np.float32) / 32768.0
-        samples_8k = resampy.resample(samples_16k, 16000, 8000)
+        num_samples_8k = len(samples_16k) // 2  # Half the sample count
+        samples_8k = signal.resample(samples_16k, num_samples_8k)
         pcm16_data = (np.clip(samples_8k, -1.0, 1.0) * 32767.0).astype(np.int16).tobytes()
     
     # Convert bytes to float32 using proper normalization
