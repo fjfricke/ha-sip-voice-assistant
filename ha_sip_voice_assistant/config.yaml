@@ -12,7 +12,6 @@ startup: application
 boot: auto
 ports:
   5060/udp: 5060
-  10000-20000/udp: "10000-20000"
 options:
   sip_server: "192.168.1.1"
   sip_username: ""
@@ -33,7 +32,7 @@ schema:
   sip_username: str
   sip_password: str
   sip_display_name: str
-  sip_transport: "str('udp'|'tcp')"
+  sip_transport: "match(^(udp|tcp)$)"
   sip_port: int
   openai_api_key: password
   openai_model: str
