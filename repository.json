@@ -1,5 +1,12 @@
 {
   "name": "HA SIP Voice Assistant Repository",
-  "url": "https://github.com/yourusername/ha-sip-voice-assistant",
-  "maintainer": "Your Name"
+  "url": "https://github.com/fjfricke/ha-sip-voice-assistant",
+  "maintainer": "Felix Fricke",
+  "addons": [
+    {
+      "slug": "ha_sip_voice_assistant",
+      "name": "HA SIP Voice Assistant",
+      "version": "0.1.0"
+    }
+  ]
 }
