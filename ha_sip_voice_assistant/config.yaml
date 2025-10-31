@@ -21,7 +21,7 @@ options:
   sip_port: 5060
   openai_api_key: ""
   openai_model: "gpt-realtime"
-  homeassistant_url: "http://supervisor/core"
+  homeassistant_url: "http://homeassistant:8123"
   homeassistant_token: ""
   # Note: If homeassistant_token is empty, the addon will try to use
   # the Supervisor token automatically (SUPERVISOR_TOKEN env var or secrets)
