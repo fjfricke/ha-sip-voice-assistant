@@ -1,0 +1,7 @@
+# This file is kept for backwards compatibility
+# For new setups, use Poetry: poetry install
+# To generate this file from Poetry: poetry export -f requirements.txt --output requirements.txt --without-hashes
+
+aiohttp>=3.9.0
+websockets>=12.0
+pyyaml>=6.0

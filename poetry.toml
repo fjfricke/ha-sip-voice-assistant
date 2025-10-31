@@ -1,0 +1,4 @@
+# Poetry configuration
+[virtualenvs]
+in-project = true
+

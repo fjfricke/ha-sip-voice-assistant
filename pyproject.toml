@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "ha-sip-voice-assistant"
+version = "0.1.0"
+description = "Home Assistant addon for SIP-to-AI voice assistant"
+readme = "README.md"
+authors = ["Your Name <you@example.com>"]
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aiohttp = "^3.9.0"
+websockets = "^12.0"
+pyyaml = "^6.0"
+g711 = "^1.6.5"
+soundfile = "^0.13.1"
+samplerate = "^0.2.2"
+resampy = "^0.4.3"
+g722 = "^1.2.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.21.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+ha-sip-voice-assistant = "app.main:main"
+
