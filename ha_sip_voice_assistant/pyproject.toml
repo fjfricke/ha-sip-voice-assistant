@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ha-sip-voice-assistant"
-version = "0.1.3"
+version = "0.1.4"
 description = "Home Assistant addon for SIP-to-AI voice assistant"
 readme = "README.md"
 authors = ["Your Name <you@example.com>"]

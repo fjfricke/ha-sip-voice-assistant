@@ -1,14 +1,17 @@
 name: "HA SIP Voice Assistant"
-version: "0.1.3"
+version: "0.1.4"
 slug: "ha_sip_voice_assistant"
 description: "SIP-to-AI voice assistant for Home Assistant with FritzBox integration"
 url: "https://github.com/fjfricke/ha-sip-voice-assistant"
 arch:
-  - amd64
+  - armhf
+  - armv7
   - aarch64
-# Use pre-built images (recommended) - Home Assistant will replace {arch} with amd64/aarch64
+  - amd64
+  - i386
+# Use pre-built images (recommended) - Home Assistant will replace {arch} with the appropriate architecture
 # If this line is commented out, Home Assistant will build from Dockerfile on the device
-image: "ghcr.io/fjfricke/ha-sip-voice-assistant-{arch}:0.1.3"
+image: "ghcr.io/fjfricke/ha-sip-voice-assistant-{arch}:0.1.4"
 startup: application
 boot: auto
 ports:

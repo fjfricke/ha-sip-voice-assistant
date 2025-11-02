@@ -27,12 +27,21 @@ jobs:
     strategy:
       matrix:
         arch:
+          - name: armhf
+            base: ghcr.io/home-assistant/armhf-base:3.22
+            platform: linux/arm/v6
+          - name: armv7
+            base: ghcr.io/home-assistant/armv7-base:3.22
+            platform: linux/arm/v7
           - name: aarch64
             base: ghcr.io/home-assistant/aarch64-base:3.22
             platform: linux/arm64
           - name: amd64
             base: ghcr.io/home-assistant/amd64-base:3.22
             platform: linux/amd64
+          - name: i386
+            base: ghcr.io/home-assistant/i386-base:3.22
+            platform: linux/386
 
     steps:
       - name: Checkout repository

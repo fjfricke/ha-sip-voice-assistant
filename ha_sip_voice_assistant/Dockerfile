@@ -21,7 +21,8 @@ RUN apk add --no-cache \
     libsamplerate-dev \
     py3-pybind11 \
     build-base \
-    cmake
+    cmake \
+    libffi-dev
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
