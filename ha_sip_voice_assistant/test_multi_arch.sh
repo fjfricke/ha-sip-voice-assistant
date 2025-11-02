@@ -41,7 +41,6 @@ TEST_CONFIGS=(
     "armv7-base:3.22|linux/arm/v7"
     "aarch64-base:3.22|linux/arm64"
     "amd64-base:3.22|linux/amd64"
-    "i386-base:3.22|linux/386"
 )
 
 # Create a buildx builder if it doesn't exist

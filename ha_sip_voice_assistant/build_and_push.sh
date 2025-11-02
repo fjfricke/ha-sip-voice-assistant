@@ -74,7 +74,6 @@ BUILDS=(
     "armv7|ghcr.io/home-assistant/armv7-base:3.22|linux/arm/v7"
     "aarch64|ghcr.io/home-assistant/aarch64-base:3.22|linux/arm64"
     "amd64|ghcr.io/home-assistant/amd64-base:3.22|linux/amd64"
-    "i386|ghcr.io/home-assistant/i386-base:3.22|linux/386"
 )
 
 echo -e "${BLUE}🔨 Building images...${NC}"

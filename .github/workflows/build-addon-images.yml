@@ -39,9 +39,6 @@ jobs:
           - name: amd64
             base: ghcr.io/home-assistant/amd64-base:3.22
             platform: linux/amd64
-          - name: i386
-            base: ghcr.io/home-assistant/i386-base:3.22
-            platform: linux/386
 
     steps:
       - name: Checkout repository
