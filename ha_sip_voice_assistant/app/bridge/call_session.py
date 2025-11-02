@@ -90,6 +90,7 @@ class CallSession:
             on_audio_received=self._handle_ai_audio,
             on_tool_call=self._handle_tool_call,
             on_transcription=self._handle_transcription,
+            on_interrupted=self._handle_interrupted,
         )
         
         # Connect to OpenAI
@@ -221,8 +222,8 @@ class CallSession:
             if requires_pin:
                 # Add PIN parameter (optional - OpenAI will prompt if missing)
                 tool_def["parameters"]["properties"]["pin"] = {
-                    "type": "string",
-                    "description": "Voice PIN code for authentication. The user will say this verbally. The PIN can be any length and will be spoken as digits (e.g., 'one one eight three three' for a 5-digit PIN).",
+                    "type": "integer",
+                    "description": "Voice PIN code for authentication as an integer. The user will say this verbally (e.g., 'one one eight three three' for PIN 11833). The voice input will be converted to an integer.",
                 }
                 # PIN is not required in the schema - OpenAI will ask if missing
                 # This allows OpenAI to handle the PIN request flow naturally
@@ -335,6 +336,12 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
         """Handle transcription from OpenAI."""
         self.transcription_buffer = text
         # Could be used for PIN verification or logging
+    
+    async def _handle_interrupted(self):
+        """Handle response interruption - clear audio buffers."""
+        # Clear downlink buffer to stop any queued audio from playing
+        self.audio_adapter.clear_buffers()
+        print("🛑 Response interrupted - cleared audio buffers")
     
     async def _handle_tool_call(self, tool_call: Dict[str, Any]):
         """Handle tool call from OpenAI."""

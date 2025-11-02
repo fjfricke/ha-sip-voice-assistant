@@ -62,9 +62,10 @@ class ToolHandler:
         
         if requires_pin:
             # Get PIN from tool call arguments (voice-based via Realtime API)
+            # OpenAI returns it as an integer per the tool schema ("type": "integer")
             provided_pin = arguments.get("pin")
             
-            if not provided_pin:
+            if provided_pin is None:
                 # PIN not provided - OpenAI will ask for it
                 return {
                     "success": False,
@@ -72,7 +73,20 @@ class ToolHandler:
                     "message": "Please provide your PIN code to proceed with this action.",
                 }
             
-            # Get expected PIN for this caller
+            # Convert to int (OpenAI should provide as int per schema, but handle string representations)
+            if not isinstance(provided_pin, int):
+                try:
+                    provided_pin_int = int(provided_pin)
+                except (ValueError, TypeError):
+                    return {
+                        "success": False,
+                        "error": "PIN_INCORRECT",
+                        "message": "The PIN format is invalid. Please provide your PIN as a number.",
+                    }
+            else:
+                provided_pin_int = provided_pin
+            
+            # Get expected PIN for this caller (already an int)
             expected_pin = self.pin_verifier.get_expected_pin(caller_id)
             if not expected_pin:
                 # No PIN configured for this caller - tool cannot be used
@@ -82,9 +96,8 @@ class ToolHandler:
                     "message": "This action requires a PIN, but no PIN is configured for your phone number. The action cannot be performed.",
                 }
             
-            # Verify the provided PIN (voice-based)
-            # The PIN comes from voice input, so we need to extract it from text
-            verified = self.pin_verifier.verify_voice_pin(provided_pin, expected_pin)
+            # Simple integer comparison - OpenAI returns PIN as integer
+            verified = (provided_pin_int == expected_pin)
             
             if not verified:
                 # PIN incorrect - OpenAI will ask again

@@ -144,7 +144,7 @@ class Config:
         """Get configuration for a specific tool."""
         return self.tools.get(tool_name)
     
-    def get_pin(self, caller_id: str) -> Optional[str]:
+    def get_pin(self, caller_id: str) -> Optional[int]:
         """Get PIN for a caller from callers.yaml. Returns None if no PIN is configured."""
         # Get caller config
         caller_config = self.get_caller_config(caller_id)
@@ -152,7 +152,12 @@ class Config:
             pin = caller_config.get("pin")
             # Return None if pin is explicitly null or not set
             if pin is not None and pin != "null":
-                return str(pin)
+                # Convert to int (handles both string and int from YAML)
+                try:
+                    return int(pin)
+                except (ValueError, TypeError):
+                    # Invalid PIN format - return None
+                    return None
         
         # No PIN configured for this caller - return None
         return None

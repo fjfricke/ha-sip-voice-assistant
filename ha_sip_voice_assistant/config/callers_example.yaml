@@ -19,4 +19,4 @@ callers:
       
       Starte das Gespräch mit: "Hallo, wie kann ich dir heute helfen?"
     available_tools: ["example_tool_1", "example_tool_2"]
-    pin: null  # Beispiel PIN: "1234" (nicht für Produktion verwenden)
+    pin: null  # Beispiel PIN: 1234 (nicht für Produktion verwenden)

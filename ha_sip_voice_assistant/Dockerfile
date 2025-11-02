@@ -7,7 +7,8 @@ FROM ${BUILD_FROM}
 WORKDIR /app
 
 # Install Python 3.12 and dependencies
-# Note: scipy and samplerate use pre-built wheels, so we don't need build tools
+# Note: g711, g722, and samplerate require compilation from source (no pre-built wheels)
+# These packages need build tools: C compiler, CMake, and make
 RUN apk add --no-cache \
     python3 \
     python3-dev \
@@ -18,7 +19,9 @@ RUN apk add --no-cache \
     git \
     libsamplerate \
     libsamplerate-dev \
-    py3-pybind11
+    py3-pybind11 \
+    build-base \
+    cmake
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 - && \

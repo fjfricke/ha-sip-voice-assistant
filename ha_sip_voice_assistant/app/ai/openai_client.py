@@ -70,10 +70,11 @@ class OpenAIRealtimeClient:
                 "output_audio_format": "pcm16",
                 "turn_detection": {
                     "type": "server_vad",  # Let OpenAI handle turn detection automatically
-                    "threshold": 0.2,  # Very low threshold for ultra-sensitive voice detection (allows interruptions)
-                    "prefix_padding_ms": 100,  # Minimal padding for immediate response
-                    "silence_duration_ms": 200,  # Very short silence for fast turn-taking and interruptions
+                    # "threshold": 0.2,  # Very low threshold for ultra-sensitive voice detection (allows interruptions)
+                    # "prefix_padding_ms": 100,  # Minimal padding for immediate response
+                    # "silence_duration_ms": 200,  # Very short silence for fast turn-taking and interruptions
                 },
+                # "interrupt_response": True,
                 "modalities": ["text", "audio"],  # Enable both text and audio
                 "tools": self.tools,
             },
