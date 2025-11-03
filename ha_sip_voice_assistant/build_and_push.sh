@@ -5,6 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_CONTEXT="${SCRIPT_DIR}"
 cd "$SCRIPT_DIR"
 
 # Colors
@@ -101,7 +102,7 @@ for build_config in "${BUILDS[@]}"; do
         --tag "${IMAGE_LATEST}" \
         --push \
         --progress=plain \
-        .; then
+        "${BUILD_CONTEXT}"; then  # Expliziter Build Context
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
         echo ""

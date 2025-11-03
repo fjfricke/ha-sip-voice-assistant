@@ -8,7 +8,8 @@ WORKDIR /app
 
 # Install Python 3.12 and dependencies
 # Note: g711, g722, and samplerate require compilation from source (no pre-built wheels)
-# These packages need build tools: C compiler, CMake, and make
+# scipy also requires compilation from source for armv7 (no pre-built wheel)
+# These packages need build tools: C compiler, CMake, make, Fortran compiler, and OpenBLAS
 RUN apk add --no-cache \
     python3 \
     python3-dev \
@@ -21,29 +22,31 @@ RUN apk add --no-cache \
     libsamplerate-dev \
     py3-pybind11 \
     build-base \
+    gfortran \
     cmake \
-    libffi-dev
+    libffi-dev \
+    openblas \
+    openblas-dev
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
     ln -s /root/.local/bin/poetry /usr/local/bin/poetry
 
-# Copy Poetry files
-COPY pyproject.toml poetry.toml poetry.lock* /app/
+# Copy only Poetry dependency files to temp location (for better layer caching)
+# This layer will be cached unless these files change
+WORKDIR /tmp/build
+COPY pyproject.toml poetry.lock* poetry.toml ./
 
-# Install dependencies
-WORKDIR /app
+# Install dependencies in temp location (this layer is cached if dependency files don't change)
+# Dependencies are installed system-wide (virtualenvs.create false)
 RUN poetry config virtualenvs.create false && \
     poetry install --only=main --no-interaction --no-ansi --no-root
 
-# Copy application files
+# Set working directory and copy all application files after dependencies are installed
+WORKDIR /app
 COPY app/ /app/app/
 COPY config/ /app/config/
-
-# Copy run script
 COPY run.sh /run.sh
-
-# Set permissions
 RUN chmod a+x /run.sh
 
 # Run the application

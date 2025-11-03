@@ -90,7 +90,6 @@ class CallSession:
             on_audio_received=self._handle_ai_audio,
             on_tool_call=self._handle_tool_call,
             on_transcription=self._handle_transcription,
-            on_interrupted=self._handle_interrupted,
         )
         
         # Connect to OpenAI
@@ -336,12 +335,6 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
         """Handle transcription from OpenAI."""
         self.transcription_buffer = text
         # Could be used for PIN verification or logging
-    
-    async def _handle_interrupted(self):
-        """Handle response interruption - clear audio buffers."""
-        # Clear downlink buffer to stop any queued audio from playing
-        self.audio_adapter.clear_buffers()
-        print("🛑 Response interrupted - cleared audio buffers")
     
     async def _handle_tool_call(self, tool_call: Dict[str, Any]):
         """Handle tool call from OpenAI."""
