@@ -10,7 +10,7 @@ arch:
   - amd64
 # Use pre-built images (recommended) - Home Assistant will replace {arch} with the appropriate architecture
 # If this line is commented out, Home Assistant will build from Dockerfile on the device
-image: "ghcr.io/fjfricke/ha-sip-voice-assistant-{arch}:0.1.6"
+image: "ghcr.io/fjfricke/ha-sip-voice-assistant-{arch}"
 startup: application
 boot: auto
 ports:
