@@ -46,11 +46,14 @@ class OpenAIRealtimeClient:
         self.ws = await websockets.connect(url, extra_headers=headers)
         self.running = True
         
+        # Start receiving loop first (to receive session.created)
+        asyncio.create_task(self._receive_loop())
+        
+        # Wait a bit for session to be created before configuring
+        await asyncio.sleep(0.5)
+        
         # Configure session
         await self._configure_session()
-        
-        # Start receiving loop
-        asyncio.create_task(self._receive_loop())
     
     async def disconnect(self):
         """Disconnect from OpenAI Realtime API."""
@@ -79,6 +82,20 @@ class OpenAIRealtimeClient:
                 "tools": self.tools,
             },
         }
+        
+        # Debug: Log session configuration
+        print(f"🔧 Configuring OpenAI session with {len(self.tools)} tools")
+        print(f"   Instructions length: {len(self.instructions)} chars")
+        for i, tool in enumerate(self.tools):
+            print(f"   Tool {i+1}: {tool.get('name', 'unknown')} - {tool.get('description', '')[:50]}...")
+        
+        # Validate JSON before sending
+        try:
+            json_str = json.dumps(config)
+            print(f"🔧 Session config JSON length: {len(json_str)} chars")
+        except Exception as e:
+            print(f"❌ Failed to serialize session config: {e}")
+            raise
         
         await self._send_message(config)
     
@@ -125,6 +142,17 @@ class OpenAIRealtimeClient:
         if msg_type == "session.created":
             self.session_id = message.get("session", {}).get("id")
             print(f"✅ OpenAI session created: {self.session_id}")
+        
+        elif msg_type == "session.updated":
+            print("✅ OpenAI session updated successfully")
+        
+        elif msg_type == "error":
+            error = message.get("error", {})
+            error_type = error.get("type", "unknown")
+            error_message = error.get("message", "No message")
+            print(f"❌ OpenAI error: {error_type} - {error_message}")
+            # Print full error for debugging
+            print(f"   Full error: {message}")
         
         elif msg_type == "response.created":
             self.is_speaking = True

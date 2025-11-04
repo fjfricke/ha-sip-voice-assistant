@@ -227,10 +227,19 @@ class CallSession:
                 # PIN is not required in the schema - OpenAI will ask if missing
                 # This allows OpenAI to handle the PIN request flow naturally
             
+            # Only add required field if there are required parameters
+            # OpenAI Realtime API expects required to be omitted if empty
             if required:
                 tool_def["parameters"]["required"] = required
             
             tools.append(tool_def)
+            
+            # Debug: Print tool definition
+            print(f"🔧 Built tool definition: {tool_name}")
+            print(f"   Description: {tool_def.get('description', '')[:50]}...")
+            print(f"   Parameters: {len(tool_def['parameters']['properties'])} properties")
+            if required:
+                print(f"   Required: {required}")
         
         return tools
     

@@ -124,7 +124,26 @@ class ToolHandler:
             }
     
     async def _execute_tool(self, tool_config: Dict[str, Any], arguments: Dict[str, Any]) -> Any:
-        """Execute a tool by calling the Home Assistant service."""
+        """Execute a tool by calling the Home Assistant service or reading entity state."""
+        tool_type = tool_config.get("type", "service")
+        
+        # Handle entity reading tools
+        if tool_type == "entity_read":
+            entity_id = tool_config.get("entity_id")
+            if not entity_id:
+                raise ValueError("Tool configuration missing entity_id for entity_read tool")
+            
+            print(f"🔧 Reading entity state: {entity_id}")
+            
+            try:
+                result = await self.ha_client.get_state(entity_id)
+                print(f"🔧 Entity state retrieved: {result}")
+                return result
+            except Exception as e:
+                print(f"❌ Failed to read entity state: {e}")
+                raise
+        
+        # Handle service calls (existing behavior)
         ha_service = tool_config.get("ha_service")
         if not ha_service:
             raise ValueError("Tool configuration missing ha_service")
