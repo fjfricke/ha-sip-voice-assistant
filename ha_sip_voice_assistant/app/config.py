@@ -34,8 +34,8 @@ class Config:
             self._load_standalone_config()
         
         # Load YAML configuration files
-        caller_config_path = self.config.get("caller_config_path", "config/callers.yaml")
-        tools_config_path = self.config.get("tools_config_path", "config/tools.yaml")
+        caller_config_path = self.config.get("caller_config_path", "/addon_config/callers.yaml")
+        tools_config_path = self.config.get("tools_config_path", "/addon_config/tools.yaml")
         
         self._load_yaml_config(caller_config_path, "callers")
         self._load_yaml_config(tools_config_path, "tools")

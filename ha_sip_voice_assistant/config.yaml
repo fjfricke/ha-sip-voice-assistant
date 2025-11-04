@@ -1,5 +1,5 @@
 name: "HA SIP Voice Assistant"
-version: "0.1.11"
+version: "0.1.12"
 slug: "ha_sip_voice_assistant"
 description: "SIP-to-AI voice assistant for Home Assistant with FritzBox integration"
 url: "https://github.com/fjfricke/ha-sip-voice-assistant"
@@ -19,7 +19,7 @@ host_network: true
 # ports:
 #   5060/udp: 5060
 map:
-  - type: homeassistant_config
+  - type: addon_config
 options:
   sip_server: "192.168.1.1"
   sip_username: ""
@@ -30,8 +30,6 @@ options:
   sip_bind_port: 5060
   openai_api_key: ""
   openai_model: "gpt-realtime"
-  caller_config_path: "/config/callers.yaml"
-  tools_config_path: "/config/tools.yaml"
 schema:
   sip_server: str
   sip_username: str
@@ -42,5 +40,3 @@ schema:
   sip_bind_port: int
   openai_api_key: password
   openai_model: str
-  caller_config_path: str
-  tools_config_path: str

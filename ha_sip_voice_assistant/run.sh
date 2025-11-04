@@ -1,25 +1,7 @@
-#!/bin/sh
+#!/usr/bin/with-contenv bashio
 set -e
 
 echo "Starting HA SIP Voice Assistant..." >&2
-
-# Ensure config directory exists
-mkdir -p /config
-
-# Copy default configs if they don't exist
-if [ ! -f /config/callers.yaml ]; then
-    if [ -f /app/config/callers_example.yaml ]; then
-        cp /app/config/callers_example.yaml /config/callers.yaml
-        echo "Created default /config/callers.yaml" >&2
-    fi
-fi
-
-if [ ! -f /config/tools.yaml ]; then
-    if [ -f /app/config/tools_example.yaml ]; then
-        cp /app/config/tools_example.yaml /config/tools.yaml
-        echo "Created default /config/tools.yaml" >&2
-    fi
-fi
 
 # Change to app directory
 cd /app || exit 1
