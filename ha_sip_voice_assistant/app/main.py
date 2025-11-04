@@ -58,7 +58,8 @@ class Application:
             password=sip_config["password"],
             display_name=sip_config["display_name"],
             transport=sip_config["transport"],
-            port=sip_config["port"],
+            port=sip_config["port"],  # Server port (where FritzBox listens)
+            bind_port=sip_config.get("bind_port"),  # Bind port (where we listen locally)
             on_incoming_call=self._handle_incoming_call,
         )
         

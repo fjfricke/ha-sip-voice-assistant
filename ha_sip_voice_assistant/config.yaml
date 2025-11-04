@@ -27,6 +27,7 @@ options:
   sip_display_name: "HA Voice Assistant"
   sip_transport: "udp"
   sip_port: 5060
+  sip_bind_port: 5060
   openai_api_key: ""
   openai_model: "gpt-realtime"
   caller_config_path: "/config/callers.yaml"
@@ -38,6 +39,7 @@ schema:
   sip_display_name: str
   sip_transport: "match(^(udp|tcp)$)"
   sip_port: int
+  sip_bind_port: int
   openai_api_key: password
   openai_model: str
   caller_config_path: str

@@ -64,13 +64,16 @@ class Config:
     
     def _load_standalone_config(self):
         """Load configuration from environment variables."""
+        sip_port = int(os.getenv("SIP_PORT", "5060"))
+        sip_bind_port = int(os.getenv("SIP_BIND_PORT", str(sip_port)))  # Default to sip_port if not set
         self.config = {
             "sip_server": os.getenv("SIP_SERVER", "192.168.1.1"),
             "sip_username": os.getenv("SIP_USERNAME", ""),
             "sip_password": os.getenv("SIP_PASSWORD", ""),
             "sip_display_name": os.getenv("SIP_DISPLAY_NAME", "HA Voice Assistant"),
             "sip_transport": os.getenv("SIP_TRANSPORT", "udp"),
-            "sip_port": int(os.getenv("SIP_PORT", "5060")),
+            "sip_port": sip_port,  # Server port (where FritzBox listens, typically 5060)
+            "sip_bind_port": sip_bind_port,  # Bind port (where we listen, can be any port)
             "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
             "openai_model": os.getenv("OPENAI_MODEL", "gpt-realtime"),
             "homeassistant_url": os.getenv("HOMEASSISTANT_URL", "http://localhost:8123"),
@@ -96,13 +99,17 @@ class Config:
     
     def get_sip_config(self) -> Dict[str, Any]:
         """Get SIP configuration."""
+        # sip_port: Server port (where FritzBox listens, typically 5060)
+        # sip_bind_port: Bind port (where we listen locally, can be any port like 5091)
+        # We send REGISTER to sip_port, but advertise sip_bind_port in Contact/Via headers
         return {
             "server": self.config["sip_server"],
             "username": self.config["sip_username"],
             "password": self.config["sip_password"],
             "display_name": self.config["sip_display_name"],
             "transport": self.config["sip_transport"],
-            "port": self.config["sip_port"],
+            "port": self.config["sip_port"],  # Server port (where to send REGISTER to)
+            "bind_port": self.config.get("sip_bind_port", self.config["sip_port"]),  # Bind port (where we listen)
         }
     
     def get_openai_config(self) -> Dict[str, Any]:

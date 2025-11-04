@@ -20,6 +20,7 @@ class SIPClient:
         display_name: str = "HA Voice Assistant",
         transport: str = "udp",
         port: int = 5060,
+        bind_port: Optional[int] = None,
         on_incoming_call: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None,
     ):
         self.server = server
@@ -27,11 +28,15 @@ class SIPClient:
         self.password = password
         self.display_name = display_name
         self.transport = transport
-        self.port = port
+        self.server_port = port  # Server port (where FritzBox listens, typically 5060)
         self.on_incoming_call = on_incoming_call
         
         self.local_ip = self._get_local_ip()
-        self.local_port = port
+        # Bind to bind_port if provided, otherwise use server_port
+        # This is the port we actually listen on locally
+        self.local_port = bind_port if bind_port is not None else port
+        # We advertise our actual bind port in Contact/Via headers
+        # FritzBox will send responses to this port
         
         self.transport_obj: Optional[asyncio.DatagramTransport] = None
         self.protocol: Optional[SIPProtocol] = None
@@ -91,7 +96,7 @@ class SIPClient:
                 lambda: SIPProtocol(self),
                 local_addr=(self.local_ip, self.local_port),
             )
-            print(f"✅ UDP socket bound successfully")
+            print(f"✅ UDP socket bound successfully to {self.local_ip}:{self.local_port}")
         except OSError as e:
             print(f"❌ Failed to bind UDP socket: {e}")
             # Try binding to 0.0.0.0 instead
@@ -157,13 +162,15 @@ class SIPClient:
             self.cseq += 1  # Only increment on first attempt
         
         if not with_auth:
-            print(f"Attempting SIP registration with {self.server}:{self.port}...")
+            print(f"Attempting SIP registration with {self.server}:{self.server_port}...")
             print(f"  Username: {self.username}")
-            print(f"  Local address: {self.local_ip}:{self.local_port}")
+            print(f"  Binding to: {self.local_ip}:{self.local_port}")
+            print(f"  Will advertise Contact: {self.local_ip}:{self.local_port}")
         else:
             print(f"Retrying registration with digest authentication...")
         
         # Create REGISTER request
+        # Send to server_port (where FritzBox listens, typically 5060)
         uri = f"sip:{self.server}"
         request = (
             f"REGISTER {uri} SIP/2.0\r\n"
@@ -188,9 +195,10 @@ class SIPClient:
         
         request += f"Content-Length: 0\r\n\r\n"
         
+        # Send REGISTER to server_port (where FritzBox listens)
         self.transport_obj.sendto(
             request.encode(),
-            (self.server, self.port),
+            (self.server, self.server_port),
         )
         
         if not with_auth:
@@ -217,9 +225,10 @@ class SIPClient:
             f"\r\n"
         )
         
+        # Send UNREGISTER to server_port (where FritzBox listens)
         self.transport_obj.sendto(
             request.encode(),
-            (self.server, self.port),
+            (self.server, self.server_port),
         )
     
     async def _registration_refresh_loop(self):
