@@ -45,19 +45,22 @@ class Config:
         with open("/data/options.json", "r") as f:
             self.config = json.load(f)
         
-        # In addon mode, try to use supervisor token if no token is configured
-        # The supervisor automatically injects the token via SUPERVISOR_TOKEN env var
-        if not self.config.get("homeassistant_token"):
-            # The Supervisor token is automatically available as environment variable
-            # in Home Assistant addon containers
-            supervisor_token = os.getenv("SUPERVISOR_TOKEN")
-            
-            if supervisor_token:
-                self.config["homeassistant_token"] = supervisor_token
-                print("✅ Using Supervisor token for Home Assistant API access (no manual token needed)")
-            else:
-                print("⚠️  No Home Assistant token configured and SUPERVISOR_TOKEN not available")
-                print("   Please set homeassistant_token in addon options or ensure addon is running in Supervisor")
+        # In addon mode, use Supervisor API proxy for Home Assistant communication
+        # See: https://developers.home-assistant.io/docs/add-ons/communication
+        # The URL must include /api: http://supervisor/core/api
+        # The token is automatically available via SUPERVISOR_TOKEN env var
+        self.config["homeassistant_url"] = "http://supervisor/core/api"
+        supervisor_token = os.getenv("SUPERVISOR_TOKEN")
+        
+        if supervisor_token:
+            self.config["homeassistant_token"] = supervisor_token
+            print("✅ Using Supervisor API proxy for Home Assistant communication")
+            print("   URL: http://supervisor/core/api")
+            print("   Token: Using SUPERVISOR_TOKEN (automatically provided)")
+        else:
+            print("⚠️  SUPERVISOR_TOKEN not available")
+            print("   Please ensure homeassistant_api: true is set in config.yaml")
+            self.config["homeassistant_token"] = ""
     
     def _load_standalone_config(self):
         """Load configuration from environment variables."""
@@ -111,14 +114,17 @@ class Config:
     
     def get_homeassistant_config(self) -> Dict[str, Any]:
         """Get Home Assistant configuration."""
-        token = self.config.get("homeassistant_token", "")
-        
-        # In addon mode, if no token configured, try supervisor token as fallback
-        if not token and self.is_addon_mode:
-            token = os.getenv("SUPERVISOR_TOKEN", "")
+        # In addon mode, use Supervisor API proxy (URL already includes /api)
+        if self.is_addon_mode:
+            url = self.config.get("homeassistant_url", "http://supervisor/core/api")
+            token = self.config.get("homeassistant_token", "") or os.getenv("SUPERVISOR_TOKEN", "")
+        else:
+            # Standalone mode: use configured URL and token (ensure /api is present)
+            url = self.config.get("homeassistant_url", "http://localhost:8123")
+            token = self.config.get("homeassistant_token", "")
         
         return {
-            "url": self.config["homeassistant_url"],
+            "url": url,
             "token": token,
         }
     

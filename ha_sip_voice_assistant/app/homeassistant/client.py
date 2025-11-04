@@ -55,7 +55,7 @@ class HomeAssistantClient:
         if not self.session:
             await self.start()
         
-        url = f"{self.url}/api/services/{domain}/{service}"
+        url = f"{self.url}/services/{domain}/{service}"
         
         service_data = kwargs.copy()
         if entity_id:
@@ -68,7 +68,7 @@ class HomeAssistantClient:
         async with self.session.post(url, json=service_data) as response:
             if response.status == 401:
                 error_text = await response.text()
-                print(f"❌ HA Authentication failed (401)")
+                print("❌ HA Authentication failed (401)")
                 print(f"   URL: {url}")
                 print(f"   Token present: {bool(self.token)}")
                 print(f"   Token length: {len(self.token) if self.token else 0}")
@@ -77,7 +77,7 @@ class HomeAssistantClient:
             
             if response.status == 400:
                 error_text = await response.text()
-                print(f"❌ HA Bad Request (400)")
+                print("❌ HA Bad Request (400)")
                 print(f"   URL: {url}")
                 print(f"   Service data: {service_data}")
                 print(f"   Response: {error_text[:500]}")
@@ -98,7 +98,7 @@ class HomeAssistantClient:
         if not self.session:
             await self.start()
         
-        url = f"{self.url}/api/states/{entity_id}"
+        url = f"{self.url}/states/{entity_id}"
         
         async with self.session.get(url) as response:
             response.raise_for_status()
@@ -117,15 +117,13 @@ class HomeAssistantClient:
         if not self.session:
             await self.start()
         
-        if domain:
-            url = f"{self.url}/api/states"
-            async with self.session.get(url) as response:
-                response.raise_for_status()
-                states = await response.json()
+        url = f"{self.url}/states"
+        
+        async with self.session.get(url) as response:
+            response.raise_for_status()
+            states = await response.json()
+            if domain:
                 return [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
-        else:
-            url = f"{self.url}/api/states"
-            async with self.session.get(url) as response:
-                response.raise_for_status()
-                return await response.json()
+            else:
+                return states
 
