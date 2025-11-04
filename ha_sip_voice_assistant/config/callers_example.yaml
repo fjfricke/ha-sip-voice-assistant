@@ -1,15 +1,19 @@
 # Callers map phone numbers to profiles.
 # Each caller can reference a profile (defined in profiles.yaml) and optionally override the PIN.
 # If a caller doesn't specify a profile, the "default" profile from profiles.yaml is used.
+# You can specify a name for each caller, which can be used in profile instructions as templates.
 callers:
   "+1234567890":
+    name: "Guest"  # Name that can be used in instruction templates
     profile: "english_basic"  # Reference to a profile in profiles.yaml
     pin: null  # No PIN configured for this caller
   
   "+0987654321":
+    name: "Felix"  # Name that can be used in instruction templates
     profile: "zurich_german_full"  # Multiple callers can use the same profile
     pin: 1234  # PIN can be overridden per caller
   
   # Caller without explicit profile will use "default" profile
   "+1111111111":
+    name: "User"  # Optional: if not specified, defaults to "Guest"
     pin: null

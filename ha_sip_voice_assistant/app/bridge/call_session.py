@@ -78,8 +78,16 @@ class CallSession:
         # Build tool definitions for OpenAI
         tools = self._build_tool_definitions()
         
+        # Validate instructions before enhancing
+        if not self.instructions or not self.instructions.strip():
+            self.instructions = "You are a helpful assistant."
+        
         # Enhance instructions with PIN guidance if needed
         enhanced_instructions = self._enhance_instructions(self.instructions, tools)
+        
+        # Validate enhanced instructions
+        if not enhanced_instructions or not enhanced_instructions.strip():
+            enhanced_instructions = "You are a helpful assistant."
         
         # Initialize OpenAI client
         self.ai_client = OpenAIRealtimeClient(

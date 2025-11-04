@@ -137,8 +137,8 @@ class ToolHandler:
             
             try:
                 result = await self.ha_client.get_state(entity_id)
-                print(f"🔧 Entity state retrieved: {result}")
-                return result
+                print(f"🔧 Entity state retrieved: {result.get("state")}")
+                return result.get("state")
             except Exception as e:
                 print(f"❌ Failed to read entity state: {e}")
                 raise
