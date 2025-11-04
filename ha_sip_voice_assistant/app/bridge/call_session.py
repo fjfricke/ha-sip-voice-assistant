@@ -6,7 +6,6 @@ import time
 import numpy as np
 from typing import Dict, Any, Optional
 from app.config import Config
-from app.sip.client import SIPClient
 from app.sip.rtp_session import RTPSession
 from app.sip.audio_bridge import RTPAudioBridge
 from app.bridge.audio_adapter import AudioAdapter

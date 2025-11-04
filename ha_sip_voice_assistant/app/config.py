@@ -14,6 +14,7 @@ class Config:
         self.is_addon_mode = os.path.exists("/data/options.json")
         self.config: Dict[str, Any] = {}
         self.callers: Dict[str, Any] = {}
+        self.profiles: Dict[str, Any] = {}
         self.tools: Dict[str, Any] = {}
         
         # Load .env file in standalone mode
@@ -35,9 +36,11 @@ class Config:
         
         # Load YAML configuration files
         caller_config_path = self.config.get("caller_config_path", "/config/callers.yaml")
+        profiles_config_path = self.config.get("profiles_config_path", "/config/profiles.yaml")
         tools_config_path = self.config.get("tools_config_path", "/config/tools.yaml")
         
         self._load_yaml_config(caller_config_path, "callers")
+        self._load_yaml_config(profiles_config_path, "profiles")
         self._load_yaml_config(tools_config_path, "tools")
     
     def _load_addon_config(self):
@@ -79,6 +82,7 @@ class Config:
             "homeassistant_url": os.getenv("HOMEASSISTANT_URL", "http://localhost:8123"),
             "homeassistant_token": os.getenv("HOMEASSISTANT_TOKEN", ""),
             "caller_config_path": os.getenv("CALLER_CONFIG_PATH", "config/callers.yaml"),
+            "profiles_config_path": os.getenv("PROFILES_CONFIG_PATH", "config/profiles.yaml"),
             "tools_config_path": os.getenv("TOOLS_CONFIG_PATH", "config/tools.yaml"),
         }
     
@@ -94,6 +98,8 @@ class Config:
                 data = yaml.safe_load(f)
                 if key == "callers":
                     self.callers = data.get("callers", {})
+                elif key == "profiles":
+                    self.profiles = data.get("profiles", {})
                 elif key == "tools":
                     self.tools = data.get("tools", {})
     
@@ -156,6 +162,14 @@ class Config:
     def get_tool_config(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """Get configuration for a specific tool."""
         return self.tools.get(tool_name)
+    
+    def get_profile_config(self, profile_name: str) -> Optional[Dict[str, Any]]:
+        """Get configuration for a specific profile."""
+        return self.profiles.get(profile_name)
+    
+    def get_default_profile_config(self) -> Optional[Dict[str, Any]]:
+        """Get the default profile configuration."""
+        return self.profiles.get("default")
     
     def get_pin(self, caller_id: str) -> Optional[int]:
         """Get PIN for a caller from callers.yaml. Returns None if no PIN is configured."""
