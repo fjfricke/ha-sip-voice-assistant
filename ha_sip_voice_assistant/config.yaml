@@ -16,8 +16,8 @@ startup: application
 boot: auto
 homeassistant_api: true
 host_network: true
-ports:
-  5060/udp: 5060
+# ports:
+#   5060/udp: 5060
 map:
   - type: homeassistant_config
 options:
@@ -42,4 +42,3 @@ schema:
   openai_model: str
   caller_config_path: str
   tools_config_path: str
-

@@ -31,7 +31,7 @@ class SIPClient:
         self.on_incoming_call = on_incoming_call
         
         self.local_ip = self._get_local_ip()
-        self.local_port = random.randint(5060, 5099)
+        self.local_port = port
         
         self.transport_obj: Optional[asyncio.DatagramTransport] = None
         self.protocol: Optional[SIPProtocol] = None
