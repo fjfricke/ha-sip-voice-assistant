@@ -49,6 +49,13 @@ class SIPClient:
         self.tag = self._generate_tag()
         self.branch = None
         
+        # Connection monitoring state
+        self.last_registration_time: Optional[float] = None
+        self.registration_expires_at: Optional[float] = None
+        self.reconnect_attempts = 0
+        self.reconnect_task: Optional[asyncio.Task] = None
+        self._registration_refresh_task: Optional[asyncio.Task] = None
+        
         # Digest authentication state
         self.auth_realm = None
         self.auth_nonce = None
@@ -113,11 +120,27 @@ class SIPClient:
         await self.register()
         
         # Start registration refresh loop
-        asyncio.create_task(self._registration_refresh_loop())
+        self._registration_refresh_task = asyncio.create_task(self._registration_refresh_loop())
     
     async def stop(self):
         """Stop the SIP client."""
         self.running = False
+        
+        # Cancel reconnect task if running
+        if self.reconnect_task:
+            self.reconnect_task.cancel()
+            try:
+                await self.reconnect_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Cancel registration refresh task
+        if self._registration_refresh_task:
+            self._registration_refresh_task.cancel()
+            try:
+                await self._registration_refresh_task
+            except asyncio.CancelledError:
+                pass
         
         # Unregister
         if self.registered:
@@ -231,12 +254,110 @@ class SIPClient:
             (self.server, self.server_port),
         )
     
+    async def _attempt_reconnection(self):
+        """Attempt to reconnect with exponential backoff."""
+        # Don't start multiple reconnect tasks
+        if self.reconnect_task and not self.reconnect_task.done():
+            return
+        
+        # Start reconnection task
+        self.reconnect_task = asyncio.create_task(self._reconnection_loop())
+    
+    async def _reconnection_loop(self):
+        """Reconnection loop with exponential backoff."""
+        first_attempt = True
+        while self.running and not self.registered:
+            # Calculate backoff delay: immediate first attempt, then 1s, 2s, 4s, 8s, 16s, 32s, max 60s
+            if first_attempt:
+                delay = 0
+                first_attempt = False
+            else:
+                delay = min(2 ** (self.reconnect_attempts - 1), 60)
+            
+            if delay > 0:
+                print(f"🔄 Attempting reconnection (attempt {self.reconnect_attempts + 1}, waiting {delay}s)...")
+                await asyncio.sleep(delay)
+            else:
+                print(f"🔄 Attempting reconnection (attempt {self.reconnect_attempts + 1})...")
+            
+            if not self.running:
+                break
+            
+            # Attempt registration
+            self.reconnect_attempts += 1
+            await self.register()
+            
+            # Wait a bit to see if registration succeeds
+            await asyncio.sleep(2)
+            
+            # If we're now registered, break out of loop
+            if self.registered:
+                print(f"✅ Reconnection successful after {self.reconnect_attempts} attempt(s)")
+                self.reconnect_attempts = 0
+                break
+    
     async def _registration_refresh_loop(self):
-        """Periodically refresh registration."""
+        """Periodically refresh registration and check connection health."""
         while self.running:
-            await asyncio.sleep(1800)  # Refresh every 30 minutes
-            if self.running and self.registered:
-                await self.register()
+            # Check every 5 minutes (300 seconds) for connection health
+            await asyncio.sleep(300)
+            
+            if not self.running:
+                break
+            
+            # Skip refresh if there are active calls - don't interrupt ongoing calls
+            if len(self.active_calls) > 0:
+                print(f"⏸️  Skipping registration refresh (active call in progress)")
+                continue
+            
+            # Check if we need to refresh registration
+            current_time = time.time()
+            
+            # If we have an expiry time and we're past 80% of the lifetime, refresh proactively
+            if self.registration_expires_at and self.last_registration_time:
+                lifetime = self.registration_expires_at - self.last_registration_time
+                refresh_threshold = self.last_registration_time + (lifetime * 0.8)
+                if current_time >= refresh_threshold:
+                    print(f"🔄 Proactively refreshing registration (80% of expiry time reached)")
+                    await self.register()
+            # If we're registered but haven't refreshed recently, do a health check
+            elif self.registered:
+                # If we haven't registered in the last 5 minutes, refresh
+                if not self.last_registration_time or (current_time - self.last_registration_time) > 300:
+                    print(f"🔄 Periodic registration refresh (health check)")
+                    await self.register()
+            # If we're not registered, attempt reconnection
+            elif not self.registered:
+                print(f"⚠️  Not registered, attempting reconnection...")
+                await self._attempt_reconnection()
+    
+    def _schedule_refresh_after_call(self):
+        """Schedule registration refresh after call ends (if needed)."""
+        if not self.running:
+            return
+        
+        # Only refresh if there are no active calls
+        if len(self.active_calls) > 0:
+            return
+        
+        # Check if we need to refresh after call ends
+        current_time = time.time()
+        
+        # If not registered, attempt reconnection
+        if not self.registered:
+            print(f"🔄 No active calls, attempting reconnection...")
+            asyncio.create_task(self._attempt_reconnection())
+        # If we're past 80% of expiry time, refresh immediately
+        elif self.registration_expires_at and self.last_registration_time:
+            lifetime = self.registration_expires_at - self.last_registration_time
+            refresh_threshold = self.last_registration_time + (lifetime * 0.8)
+            if current_time >= refresh_threshold:
+                print(f"🔄 Call ended, refreshing registration (past 80% of expiry)")
+                asyncio.create_task(self.register())
+        # If we haven't registered recently and call ended, do a health check
+        elif self.registered and (not self.last_registration_time or (current_time - self.last_registration_time) > 300):
+            print(f"🔄 Call ended, refreshing registration (health check)")
+            asyncio.create_task(self.register())
     
     def _handle_invite(self, headers: Dict[str, str], body: str, from_addr: tuple):
         """Handle incoming INVITE request."""
@@ -455,6 +576,7 @@ class SIPClient:
         if call_id in self.active_calls:
             self.active_calls[call_id]["ended"] = True
             print(f"📞 Marked call {call_id} as ended (session will clean up)")
+            # Don't refresh here - call is still in active_calls, refresh will happen after cleanup
         else:
             print(f"⚠️  BYE received for call {call_id}, but call not in active_calls")
             print(f"   Active calls: {list(self.active_calls.keys())}")
@@ -500,9 +622,26 @@ class SIPClient:
                 # Check if this is a REGISTER response
                 cseq = headers.get("CSeq", "")
                 if "REGISTER" in cseq:
+                    # Parse Expires header to track registration lifetime
+                    expires_header = headers.get("Expires", "3600")
+                    try:
+                        expires_seconds = int(expires_header)
+                    except ValueError:
+                        expires_seconds = 3600  # Default to 1 hour
+                    
+                    current_time = time.time()
+                    self.last_registration_time = current_time
+                    self.registration_expires_at = current_time + expires_seconds
+                    
                     if not self.registered:
                         print(f"✅ SIP Registration successful! (200 {reason})")
-                        self.registered = True
+                        print(f"   Registration expires in {expires_seconds} seconds")
+                    else:
+                        print(f"🔄 Registration refreshed successfully (expires in {expires_seconds} seconds)")
+                    
+                    self.registered = True
+                    # Reset reconnection attempts on successful registration
+                    self.reconnect_attempts = 0
             elif status_code == 401:
                 # Extract digest authentication challenge
                 www_auth = headers.get("WWW-Authenticate", headers.get("Proxy-Authenticate", ""))
@@ -536,7 +675,23 @@ class SIPClient:
                     print(f"⚠️  SIP Registration requires authentication (401 {reason})")
                     print("   Unknown authentication method")
             elif status_code >= 400:
-                print(f"❌ SIP Registration failed: {status_code} {reason}")
+                # Check if this is a REGISTER response
+                cseq = headers.get("CSeq", "")
+                if "REGISTER" in cseq:
+                    print(f"❌ SIP Registration failed: {status_code} {reason}")
+                    # Mark as unregistered on failure
+                    if self.registered:
+                        print(f"⚠️  Marking as unregistered due to registration failure")
+                        self.registered = False
+                    
+                    # For certain error codes, attempt reconnection
+                    if status_code in (401, 403, 408, 500, 503):
+                        # Don't reconnect immediately for 401 - let auth retry handle it
+                        if status_code != 401:
+                            await self._attempt_reconnection()
+                    elif status_code >= 400:
+                        # For other 4xx/5xx errors, attempt reconnection
+                        await self._attempt_reconnection()
         elif request_line.startswith("INVITE"):
             self._handle_invite(headers, body, from_addr)
         elif request_line.startswith("ACK"):
@@ -565,5 +720,18 @@ class SIPProtocol(asyncio.DatagramProtocol):
         print(f"SIP protocol error: {exc}")
     
     def connection_lost(self, exc):
-        pass
+        """Handle connection loss - trigger reconnection."""
+        if exc:
+            print(f"⚠️  SIP connection lost: {exc}")
+        else:
+            print(f"⚠️  SIP connection lost (unknown reason)")
+        
+        # Mark as unregistered
+        if self.sip_client.registered:
+            print(f"⚠️  Marking as unregistered due to connection loss")
+            self.sip_client.registered = False
+        
+        # Trigger reconnection attempt
+        if self.sip_client.running:
+            asyncio.create_task(self.sip_client._attempt_reconnection())
 

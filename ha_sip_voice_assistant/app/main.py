@@ -164,6 +164,9 @@ class Application:
             if call_id in self.sip_client.active_calls:
                 del self.sip_client.active_calls[call_id]
                 print(f"🧹 Cleaned up call {call_id} from active_calls")
+            
+            # Schedule registration refresh now that call is fully cleaned up
+            self.sip_client._schedule_refresh_after_call()
 
 
 async def main(dry_run: bool = False):
