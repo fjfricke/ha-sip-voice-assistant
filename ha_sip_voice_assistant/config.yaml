@@ -15,8 +15,11 @@ init: false
 startup: application
 boot: auto
 homeassistant_api: true
+host_network: true
 ports:
   5060/udp: 5060
+map:
+  - type: homeassistant_config
 options:
   sip_server: "192.168.1.1"
   sip_username: ""
