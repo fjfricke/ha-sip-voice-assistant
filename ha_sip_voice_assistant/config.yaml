@@ -1,5 +1,5 @@
 name: "HA SIP Voice Assistant"
-version: "0.1.12"
+version: "0.2.0"
 slug: "ha_sip_voice_assistant"
 description: "SIP-to-AI voice assistant for Home Assistant with FritzBox integration"
 url: "https://github.com/fjfricke/ha-sip-voice-assistant"
@@ -16,8 +16,6 @@ startup: application
 boot: auto
 homeassistant_api: true
 host_network: true
-# ports:
-#   5060/udp: 5060
 map:
   - type: addon_config
 options:

@@ -16,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-VERSION="${1:-0.1.2}"
+VERSION="${1:-0.2.0}"
 REGISTRY="${REGISTRY:-ghcr.io}"
 OWNER="${OWNER:-fjfricke}"
 IMAGE_NAME="${OWNER}/ha-sip-voice-assistant"
