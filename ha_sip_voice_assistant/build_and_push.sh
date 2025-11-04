@@ -71,10 +71,10 @@ fi
 
 # Build configurations
 BUILDS=(
-    # "armhf|ghcr.io/home-assistant/armhf-base:3.22|linux/arm/v6"
-    # "armv7|ghcr.io/home-assistant/armv7-base:3.22|linux/arm/v7"
+    "armhf|ghcr.io/home-assistant/armhf-base:3.22|linux/arm/v6"
+    "armv7|ghcr.io/home-assistant/armv7-base:3.22|linux/arm/v7"
     "aarch64|ghcr.io/home-assistant/aarch64-base:3.22|linux/arm64"
-    # "amd64|ghcr.io/home-assistant/amd64-base:3.22|linux/amd64"
+    "amd64|ghcr.io/home-assistant/amd64-base:3.22|linux/amd64"
 )
 
 echo -e "${BLUE}🔨 Building images...${NC}"
