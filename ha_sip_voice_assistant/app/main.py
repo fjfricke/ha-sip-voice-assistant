@@ -17,6 +17,9 @@ class Application:
         self.sip_client: Optional[SIPClient] = None
         self.active_sessions: Dict[str, CallSession] = {}
         self.running = False
+        self._shutdown_requested = False
+        self._stopping = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -25,10 +28,24 @@ class Application:
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
         print(f"Received signal {signum}, shutting down...")
-        asyncio.create_task(self.stop())
+        # Signal handlers must be fast and synchronous
+        # Just set a flag - the main loop will check this
+        self._shutdown_requested = True
+        self.running = False
+        
+        # Try to wake up the event loop if it's sleeping
+        if self._loop is not None and self._loop.is_running():
+            try:
+                # Schedule a no-op callback to wake up the loop
+                self._loop.call_soon_threadsafe(lambda: None)
+            except RuntimeError:
+                pass  # Loop might be closing
     
     async def start(self):
         """Start the application."""
+        # Store reference to event loop for signal handler
+        self._loop = asyncio.get_running_loop()
+        
         print("Loading configuration...")
         self.config.load()
         
@@ -60,15 +77,25 @@ class Application:
         
         # Keep running
         try:
-            while self.running:
+            while self.running and not self._shutdown_requested:
                 await asyncio.sleep(1)
+            
+            # If we exit the loop due to shutdown, call stop()
+            if self._shutdown_requested:
+                await self.stop()
         except KeyboardInterrupt:
             await self.stop()
     
     async def stop(self):
         """Stop the application."""
+        # Prevent multiple calls to stop()
+        if self._stopping:
+            return
+        
+        self._stopping = True
         print("Stopping application...")
         self.running = False
+        self._shutdown_requested = True
         
         # Stop all active sessions
         for session in list(self.active_sessions.values()):
