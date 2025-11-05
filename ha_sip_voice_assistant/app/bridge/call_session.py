@@ -1,19 +1,23 @@
 """Call session management."""
 import asyncio
-import random
-import socket
 import time
 import numpy as np
 from typing import Dict, Any, Optional
 from app.config import Config
-from app.sip.rtp_session import RTPSession
-from app.sip.audio_bridge import RTPAudioBridge
 from app.bridge.audio_adapter import AudioAdapter
 from app.ai.openai_client import OpenAIRealtimeClient
 from app.ai.tool_handler import ToolHandler
 from app.homeassistant.client import HomeAssistantClient
 from app.utils.pin_verification import PINVerifier
 from app.utils.caller_mapping import get_caller_settings
+
+# Try to import pyVoIP call object
+try:
+    from pyVoIP.VoIP import VoIPCall
+    PYVOIP_AVAILABLE = True
+except ImportError:
+    PYVOIP_AVAILABLE = False
+    VoIPCall = None
 
 
 class CallSession:
@@ -42,8 +46,7 @@ class CallSession:
         
         # Components
         self.audio_adapter = AudioAdapter(sample_rate=sample_rate)
-        self.rtp_session: Optional[RTPSession] = None
-        self.rtp_bridge: Optional[RTPAudioBridge] = None
+        self.voip_call: Optional[VoIPCall] = call_info.get("voip_call") if PYVOIP_AVAILABLE else None
         self.ai_client: Optional[OpenAIRealtimeClient] = None
         self.ha_client: Optional[HomeAssistantClient] = None
         self.tool_handler: Optional[ToolHandler] = None
@@ -51,6 +54,7 @@ class CallSession:
         
         # Tasks
         self.uplink_task: Optional[asyncio.Task] = None
+        self.downlink_task: Optional[asyncio.Task] = None
         self.ai_receive_task: Optional[asyncio.Task] = None
         self.running = False
         
@@ -106,48 +110,21 @@ class CallSession:
         await asyncio.sleep(0.5)  # Small delay for session to be ready
         await self.ai_client.request_response()
         
-        # Initialize RTP session
-        rtp_info = self.call_info.get("rtp_info", {})
-        remote_rtp_ip = self.call_info.get("remote_rtp_ip", rtp_info.get("rtp_ip", ""))
-        remote_rtp_port = self.call_info.get("remote_rtp_port", rtp_info.get("rtp_port", 0))
-        local_rtp_port = self.call_info.get("local_rtp_port", 0)
-        # Get local IP from SIP client or use default
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            local_ip = "127.0.0.1"
-        
-        # Get codec info from call info
-        codec_pt = int(self.call_info.get("codec_pt", 0))
-        sample_rate = int(self.call_info.get("sample_rate", 8000))
-        
-        print(f"📞 Starting RTP session: {sample_rate}Hz, PT={codec_pt}")
-        
-        self.rtp_session = RTPSession(
-            local_ip=local_ip,
-            local_port=local_rtp_port,
-            remote_ip=remote_rtp_ip,
-            remote_port=remote_rtp_port,
-            ssrc=random.randint(1000000, 9999999),
-            sample_rate=sample_rate,
-            payload_type=codec_pt,
-        )
-        
-        await self.rtp_session.start()
-        
-        # Initialize audio bridge
-        self.rtp_bridge = RTPAudioBridge(
-            self.rtp_session,
-            self.audio_adapter,
-        )
-        
-        await self.rtp_bridge.start()
+        # Answer the call if using pyVoIP
+        if self.voip_call:
+            try:
+                self.voip_call.answer()
+                print("✅ Answered pyVoIP call")
+            except Exception as e:
+                print(f"❌ Error answering call: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Start audio streaming tasks
+        # Uplink: pyVoIP call -> AudioAdapter -> OpenAI
         self.uplink_task = asyncio.create_task(self._uplink_loop())
+        # Downlink: OpenAI -> AudioAdapter -> pyVoIP call
+        self.downlink_task = asyncio.create_task(self._downlink_loop())
         self.ai_receive_task = asyncio.create_task(self._ai_receive_loop())
     
     async def stop(self):
@@ -162,6 +139,13 @@ class CallSession:
             except asyncio.CancelledError:
                 pass
         
+        if self.downlink_task:
+            self.downlink_task.cancel()
+            try:
+                await self.downlink_task
+            except asyncio.CancelledError:
+                pass
+        
         if self.ai_receive_task:
             self.ai_receive_task.cancel()
             try:
@@ -169,12 +153,13 @@ class CallSession:
             except asyncio.CancelledError:
                 pass
         
-        # Stop components
-        if self.rtp_bridge:
-            await self.rtp_bridge.stop()
-        
-        if self.rtp_session:
-            await self.rtp_session.stop()
+        # Hangup call if using pyVoIP
+        if self.voip_call:
+            try:
+                self.voip_call.hangup()
+                print("✅ Hung up pyVoIP call")
+            except Exception as e:
+                print(f"⚠️  Error hanging up call: {e}")
         
         if self.ai_client:
             await self.ai_client.disconnect()
@@ -280,39 +265,131 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
     
     async def _uplink_loop(self):
         """
-        Loop: Read from audio adapter, send to OpenAI.
-        Following OpenAI's official approach: continuously stream audio,
-        let server-side VAD handle turn detection automatically.
-        
-        IMPORTANT: Send audio continuously without gaps to avoid clicking/popping.
+        Loop: Read from pyVoIP call, convert via AudioAdapter, send to OpenAI.
+        Using AudioAdapter which worked in the original implementation.
         """
-        frame_count = 0
-        last_send_time = time.time()
+        frame_interval = 0.02  # 20ms
         
         while self.running:
             try:
-                # Get audio data (will timeout if queue is empty)
+                loop_start = time.time()
+                
+                # Read audio from pyVoIP call (160 bytes = 20ms at 8kHz, 8-bit PCM)
+                if self.voip_call:
+                    try:
+                        # Read audio in executor since pyVoIP is synchronous
+                        # Use blocking=True to ensure we get complete frames
+                        audio_8bit = await asyncio.get_event_loop().run_in_executor(
+                            None, 
+                            lambda: self.voip_call.read_audio(length=160, blocking=True)
+                        )
+                        
+                        if audio_8bit and len(audio_8bit) == 160:
+                            # Convert 8-bit unsigned PCM to 16-bit signed PCM
+                            # pyVoIP uses 8-bit unsigned (0-255), we need 16-bit signed (-32768 to 32767)
+                            # Method: Convert 8-bit to 16-bit by scaling and centering
+                            samples_8bit = np.frombuffer(audio_8bit, dtype=np.uint8)
+                            # Convert: 0-255 -> -32768 to 32767
+                            # Formula: (sample - 128) * 256
+                            samples_16bit = ((samples_8bit.astype(np.int16) - 128) * 256).astype(np.int16)
+                            pcm16_8k = samples_16bit.tobytes()
+                            
+                            # Verify: 160 samples * 2 bytes = 320 bytes
+                            if len(pcm16_8k) != 320:
+                                print(f"⚠️  Unexpected PCM16 size: {len(pcm16_8k)} bytes (expected 320)")
+                                # Pad or truncate
+                                if len(pcm16_8k) < 320:
+                                    pcm16_8k = pcm16_8k + b'\x00' * (320 - len(pcm16_8k))
+                                else:
+                                    pcm16_8k = pcm16_8k[:320]
+                            
+                            # Send to audio adapter (will resample to 24kHz for OpenAI)
+                            await self.audio_adapter.send_uplink(pcm16_8k)
+                        else:
+                            # Send silence
+                            await self.audio_adapter.send_uplink(b'\x00' * 320)
+                    except Exception as e:
+                        # Call might have ended
+                        print(f"⚠️  Error reading audio from call: {e}")
+                        self.running = False
+                        break
+                else:
+                    # No voip_call, send silence
+                    await self.audio_adapter.send_uplink(b'\x00' * 320)
+                
+                # Get audio data from adapter (resampled to 24kHz)
                 audio_data = await self.audio_adapter.get_uplink()
                 
-                # Send immediately - even if it's silence (to maintain continuous stream)
-                frame_count += 1
-                
+                # Send to OpenAI (even if silence, to maintain continuous stream)
                 await self.ai_client.send_audio(audio_data)
-                # Continuously send audio - OpenAI's server_vad will detect voice activity
-                # and automatically handle interruptions when user speaks while AI is speaking
                 
-                # Maintain timing: send every 20ms
-                current_time = time.time()
-                elapsed = current_time - last_send_time
-                sleep_time = max(0, 0.02 - elapsed)  # 20ms - elapsed time
+                # Maintain precise 20ms frame timing
+                elapsed = time.time() - loop_start
+                sleep_time = max(0, frame_interval - elapsed)
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
-                last_send_time = time.time()
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"❌ Error in uplink loop: {e}")
+                import traceback
+                traceback.print_exc()
+                await asyncio.sleep(0.01)
+    
+    async def _downlink_loop(self):
+        """
+        Loop: Read from AudioAdapter, convert to 8-bit PCM, write to pyVoIP call.
+        Using AudioAdapter which worked in the original implementation.
+        """
+        frame_interval = 0.02  # 20ms
+        
+        while self.running:
+            try:
+                loop_start = time.time()
+                
+                # Get audio from adapter (already at 8kHz PCM16, 320 bytes = 20ms)
+                pcm16_data = await self.audio_adapter.get_downlink()
+                
+                if self.voip_call and pcm16_data and len(pcm16_data) == 320:
+                    try:
+                        # Convert 16-bit signed PCM to 8-bit unsigned PCM
+                        # pyVoIP expects 8-bit unsigned (0-255)
+                        # Formula: (sample / 256) + 128
+                        samples_16bit = np.frombuffer(pcm16_data, dtype=np.int16)
+                        # Convert: -32768 to 32767 -> 0-255
+                        samples_8bit = np.clip((samples_16bit // 256) + 128, 0, 255).astype(np.uint8)
+                        audio_8bit = samples_8bit.tobytes()
+                        
+                        # Verify frame size (should be 160 bytes for 20ms at 8kHz)
+                        if len(audio_8bit) != 160:
+                            print(f"⚠️  Unexpected 8-bit PCM frame size: {len(audio_8bit)} bytes (expected 160)")
+                            # Pad or truncate to correct size
+                            if len(audio_8bit) < 160:
+                                audio_8bit = audio_8bit + b'\x80' * (160 - len(audio_8bit))  # 0x80 = silence
+                            else:
+                                audio_8bit = audio_8bit[:160]
+                        
+                        # Write to pyVoIP call in executor (synchronous call)
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: self.voip_call.write_audio(audio_8bit)
+                        )
+                    except Exception as e:
+                        print(f"⚠️  Error converting/writing audio: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                # Maintain precise 20ms frame timing
+                elapsed = time.time() - loop_start
+                sleep_time = max(0, frame_interval - elapsed)
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"❌ Error in downlink loop: {e}")
                 import traceback
                 traceback.print_exc()
                 await asyncio.sleep(0.01)
@@ -325,7 +402,7 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
             await asyncio.sleep(1)
     
     async def _handle_ai_audio(self, audio_data: bytes):
-        """Handle audio received from OpenAI."""
+        """Handle audio received from OpenAI - send to AudioAdapter."""
         # Check if AI is still speaking (might have been interrupted)
         if not self.ai_client.is_speaking:
             # AI stopped speaking (might be interrupted) - don't queue audio
@@ -338,14 +415,8 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
         if self._audio_chunk_count % 50 == 0 or self._audio_chunk_count <= 5:
             print(f"🎤 Received from OpenAI: {len(audio_data)} bytes (chunk #{self._audio_chunk_count})")
         
-        # Only queue non-empty audio data
-        if audio_data and len(audio_data) > 0:
-            # Check if this is actual audio (not just silence)
-            audio_samples = np.frombuffer(audio_data, dtype=np.int16)
-            # If all samples are zero (or very close), it's silence
-            if np.any(np.abs(audio_samples) > 10):  # Threshold for "real" audio
-                await self.audio_adapter.send_downlink(audio_data)
-            # Otherwise, skip silence - the downlink loop will generate silence when needed
+        # Send to audio adapter for downlink (will resample to 8kHz)
+        await self.audio_adapter.send_downlink(audio_data)
     
     def _handle_transcription(self, text: str):
         """Handle transcription from OpenAI."""

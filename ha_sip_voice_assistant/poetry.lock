@@ -1133,6 +1133,18 @@ files = [
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "pyvoip"
+version = "1.6.8"
+description = "PyVoIP is a pure python VoIP/SIP/RTP library."
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "pyVoIP-1.6.8-py3-none-any.whl", hash = "sha256:ef9aa4518a888dc4523e76e36ac8cb2222b2131672eec8fe6f8d225caeed1faf"},
+    {file = "pyVoIP-1.6.8.tar.gz", hash = "sha256:faf878a369526205ce6a37357801fbb0247befadd4bc1b4fc63a677651c00588"},
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.3"
 description = "YAML parser and emitter for Python"
@@ -1583,4 +1595,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "13d528a7687387e65f0f9ec6ce6347edeb7ec493c6980e87f0a8a0896ff4f345"
+content-hash = "4d47f359ac796fb09f6fcca0b3bed91021b0cfd63265f7ab311f594e1e493435"

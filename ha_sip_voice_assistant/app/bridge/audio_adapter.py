@@ -34,15 +34,25 @@ class AudioAdapter:
         await self.uplink_queue.put(pcm16_data)
     
     async def get_uplink(self) -> bytes:
-        """Get audio data for AI (uplink) - resamples SIP rate to 24kHz using resampy."""
+        """Get audio data for AI (uplink) - resamples SIP rate to 24kHz using scipy."""
         try:
-            # Wait for audio data - shorter timeout to avoid gaps
-            audio_sip = await asyncio.wait_for(self.uplink_queue.get(), timeout=0.02)
+            # Wait for audio data with timeout to maintain timing
+            # This ensures we get data when available, but don't block too long
+            try:
+                audio_sip = await asyncio.wait_for(self.uplink_queue.get(), timeout=0.02)
+            except asyncio.TimeoutError:
+                # Return silence if no data available (maintains continuous stream)
+                return b'\x00' * self.pcm16_frame_size_24k
             
             # Verify frame size
             expected_size = self.pcm16_frame_size_sip
             if len(audio_sip) != expected_size:
                 print(f"⚠️  Unexpected frame size: expected {expected_size} bytes, got {len(audio_sip)}")
+                # Pad or truncate to expected size
+                if len(audio_sip) < expected_size:
+                    audio_sip = audio_sip + b'\x00' * (expected_size - len(audio_sip))
+                else:
+                    audio_sip = audio_sip[:expected_size]
             
             # Resample SIP sample rate to 24kHz using scipy.signal.resample
             samples_sip = np.frombuffer(audio_sip, dtype=np.int16).astype(np.float32) / 32768.0
@@ -55,11 +65,16 @@ class AudioAdapter:
             # Verify output size
             if len(audio_24k) != self.pcm16_frame_size_24k:
                 print(f"⚠️  Resampling output size: expected {self.pcm16_frame_size_24k} bytes, got {len(audio_24k)}")
+                # Pad or truncate to expected size
+                if len(audio_24k) < self.pcm16_frame_size_24k:
+                    audio_24k = audio_24k + b'\x00' * (self.pcm16_frame_size_24k - len(audio_24k))
+                else:
+                    audio_24k = audio_24k[:self.pcm16_frame_size_24k]
             
             return audio_24k
-        except asyncio.TimeoutError:
-            # Return silence at 24kHz if queue is empty
-            # This should rarely happen if packets come every 20ms
+        except Exception as e:
+            print(f"⚠️  Error in get_uplink: {e}")
+            # Return silence on error to maintain stream
             return b'\x00' * self.pcm16_frame_size_24k
     
     async def send_downlink(self, pcm16_data: bytes):
@@ -85,10 +100,14 @@ class AudioAdapter:
         """Get audio data for SIP (downlink) - returns PCM16 at SIP sample rate."""
         try:
             # Wait for audio with timeout matching frame interval (20ms)
-            return await asyncio.wait_for(self.downlink_queue.get(), timeout=0.02)
-        except asyncio.TimeoutError:
-            # Return silence if no data available (at SIP rate)
-            # This should be rare if audio is streaming continuously
+            try:
+                return await asyncio.wait_for(self.downlink_queue.get(), timeout=0.02)
+            except asyncio.TimeoutError:
+                # Return silence if no data available (maintains continuous stream)
+                return b'\x00' * self.pcm16_frame_size_sip
+        except Exception as e:
+            print(f"⚠️  Error in get_downlink: {e}")
+            # Return silence on error to maintain stream
             return b'\x00' * self.pcm16_frame_size_sip
     
     def clear_buffers(self):

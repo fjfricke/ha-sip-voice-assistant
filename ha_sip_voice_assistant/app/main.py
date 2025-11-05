@@ -5,7 +5,7 @@ import sys
 import argparse
 from typing import Dict, Any, Optional
 from app.config import Config
-from app.sip.client import SIPClient
+from app.sip.pyvoip_adapter import PyVoIPAdapter
 from app.bridge.call_session import CallSession
 
 
@@ -14,7 +14,7 @@ class Application:
     
     def __init__(self):
         self.config = Config()
-        self.sip_client: Optional[SIPClient] = None
+        self.sip_client: Optional[PyVoIPAdapter] = None
         self.active_sessions: Dict[str, CallSession] = {}
         self.running = False
         self._shutdown_requested = False
@@ -49,10 +49,10 @@ class Application:
         print("Loading configuration...")
         self.config.load()
         
-        print("Starting SIP client...")
+        print("Starting SIP client (pyVoIP)...")
         sip_config = self.config.get_sip_config()
         
-        self.sip_client = SIPClient(
+        self.sip_client = PyVoIPAdapter(
             server=sip_config["server"],
             username=sip_config["username"],
             password=sip_config["password"],
@@ -66,7 +66,7 @@ class Application:
         await self.sip_client.start()
         self.running = True
         
-        print("SIP client started. Waiting for calls...")
+        print("SIP client (pyVoIP) started. Waiting for calls...")
         print(f"Registered as: {sip_config['username']}@{sip_config['server']}")
         
         # Wait a moment to see registration result
@@ -142,13 +142,10 @@ class Application:
             await session.start()
             print(f"✅ Call session {call_id} started")
             
-            # Wait for call to end (monitor SIP client for BYE)
-            # Check if call is marked as ended or removed
-            while call_id in self.sip_client.active_calls:
-                call_info_check = self.sip_client.get_call_info(call_id)
-                if call_info_check and call_info_check.get("ended", False):
-                    print(f"📞 Call {call_id} marked as ended")
-                    break
+            # Wait for call to end
+            # With pyVoIP, the call session manages its own lifecycle
+            # Monitor the session's running state
+            while session.running:
                 await asyncio.sleep(0.5)  # Check more frequently
             
             print(f"📞 Call {call_id} ended")
