@@ -55,6 +55,11 @@ class SIPClient:
         self.reconnect_attempts = 0
         self.reconnect_task: Optional[asyncio.Task] = None
         self._registration_refresh_task: Optional[asyncio.Task] = None
+        self._options_keepalive_task: Optional[asyncio.Task] = None
+        
+        # Pending request tracking for timeout detection
+        self.pending_registrations: Dict[str, Dict[str, Any]] = {}  # call_id -> {timestamp, task}
+        self.registration_timeout = 10.0  # 10 seconds timeout for REGISTER responses
         
         # Digest authentication state
         self.auth_realm = None
@@ -121,6 +126,10 @@ class SIPClient:
         
         # Start registration refresh loop
         self._registration_refresh_task = asyncio.create_task(self._registration_refresh_loop())
+        
+        # Start OPTIONS keep-alive for UDP (RFC 5626 compliant)
+        if self.transport == "udp":
+            self._options_keepalive_task = asyncio.create_task(self._options_keepalive_loop())
     
     async def stop(self):
         """Stop the SIP client."""
@@ -141,6 +150,20 @@ class SIPClient:
                 await self._registration_refresh_task
             except asyncio.CancelledError:
                 pass
+        
+        # Cancel OPTIONS keep-alive task
+        if self._options_keepalive_task:
+            self._options_keepalive_task.cancel()
+            try:
+                await self._options_keepalive_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Cancel any pending registration timeouts
+        for call_id, pending_info in list(self.pending_registrations.items()):
+            if "task" in pending_info and pending_info["task"]:
+                pending_info["task"].cancel()
+            del self.pending_registrations[call_id]
         
         # Unregister
         if self.registered:
@@ -177,12 +200,16 @@ class SIPClient:
             self.registration_call_id = self._generate_call_id()
             self.cseq = 1
             self.auth_retry_count = 0
+        else:
+            # For auth retry, use existing call_id but increment CSeq
+            # CSeq must increment for each REGISTER request (RFC 3261)
+            if not self.registration_call_id:
+                self.registration_call_id = self._generate_call_id()
         
         call_id = self.registration_call_id
         branch = self._generate_branch()
         cseq = self.cseq
-        if not with_auth:
-            self.cseq += 1  # Only increment on first attempt
+        self.cseq += 1  # Always increment CSeq for each REGISTER request
         
         if not with_auth:
             print(f"Attempting SIP registration with {self.server}:{self.server_port}...")
@@ -218,6 +245,24 @@ class SIPClient:
         
         request += f"Content-Length: 0\r\n\r\n"
         
+        # Clean up any old pending registrations for this call_id (but different CSeq)
+        # This prevents accumulation of timeout handlers for old requests
+        keys_to_remove = [key for key in self.pending_registrations.keys() if key.startswith(f"{call_id}:")]
+        for key in keys_to_remove:
+            old_info = self.pending_registrations[key]
+            if "task" in old_info and old_info["task"]:
+                old_info["task"].cancel()
+            del self.pending_registrations[key]
+        
+        # Track pending registration for timeout detection
+        pending_key = f"{call_id}:{cseq}"
+        timeout_task = asyncio.create_task(self._registration_timeout_handler(call_id, cseq))
+        self.pending_registrations[pending_key] = {
+            "timestamp": time.time(),
+            "task": timeout_task,
+            "with_auth": with_auth,
+        }
+        
         # Send REGISTER to server_port (where FritzBox listens)
         self.transport_obj.sendto(
             request.encode(),
@@ -225,7 +270,7 @@ class SIPClient:
         )
         
         if not with_auth:
-            print(f"  REGISTER request sent (Call-ID: {call_id})")
+            print(f"  REGISTER request sent (Call-ID: {call_id}, CSeq: {cseq})")
     
     async def unregister(self):
         """Unregister from the SIP server."""
@@ -296,6 +341,89 @@ class SIPClient:
                 self.reconnect_attempts = 0
                 break
     
+    async def _registration_timeout_handler(self, call_id: str, cseq: int):
+        """Handle timeout for REGISTER request if no response received."""
+        await asyncio.sleep(self.registration_timeout)
+        
+        pending_key = f"{call_id}:{cseq}"
+        if pending_key in self.pending_registrations:
+            # Timeout occurred - no response received
+            print(f"⚠️  REGISTER request timeout (Call-ID: {call_id}, CSeq: {cseq}) - no response received")
+            
+            # Mark as unregistered if we were expecting a response
+            if self.registered:
+                print(f"⚠️  Marking as unregistered due to registration timeout")
+                self.registered = False
+            
+            # Clean up pending registration
+            del self.pending_registrations[pending_key]
+            
+            # Attempt reconnection if still running
+            if self.running:
+                await self._attempt_reconnection()
+    
+    async def _options_keepalive_loop(self):
+        """Send periodic OPTIONS requests for keep-alive (RFC 5626 compliant for UDP)."""
+        # Send OPTIONS every 30 seconds to keep NAT binding alive
+        # This is more frequent than REGISTER refresh but lighter weight
+        keepalive_interval = 30
+        
+        while self.running:
+            await asyncio.sleep(keepalive_interval)
+            
+            if not self.running:
+                break
+            
+            # Only send OPTIONS if we're registered and no active calls
+            if not self.registered:
+                continue
+            
+            if len(self.active_calls) > 0:
+                continue  # Skip during active calls
+            
+            # Send OPTIONS keep-alive
+            await self._send_options_keepalive()
+    
+    async def _send_options_keepalive(self):
+        """Send OPTIONS request for keep-alive."""
+        call_id = self._generate_call_id()
+        branch = self._generate_branch()
+        uri = f"sip:{self.server}"
+        cseq = 1
+        
+        request = (
+            f"OPTIONS {uri} SIP/2.0\r\n"
+            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};branch={branch}\r\n"
+            f"From: <sip:{self.username}@{self.server}>;tag={self.tag}\r\n"
+            f"To: <sip:{self.username}@{self.server}>\r\n"
+            f"Call-ID: {call_id}\r\n"
+            f"CSeq: {cseq} OPTIONS\r\n"
+            f"Contact: <sip:{self.username}@{self.local_ip}:{self.local_port}>\r\n"
+            f"User-Agent: HA-Voice-Assistant/0.1\r\n"
+        )
+        
+        # Add Authorization header if we have auth info (FritzBox requires it)
+        if self.auth_realm and self.auth_nonce:
+            auth_header = self._calculate_digest_auth(
+                "OPTIONS", uri, self.auth_realm, self.auth_nonce,
+                self.username, self.password, cseq, call_id, self.auth_opaque
+            )
+            request += f"Authorization: {auth_header}\r\n"
+        
+        request += f"Content-Length: 0\r\n\r\n"
+        
+        try:
+            self.transport_obj.sendto(
+                request.encode(),
+                (self.server, self.server_port),
+            )
+            # Debug: only log occasionally to avoid spam
+            if not hasattr(self, '_last_options_log') or (time.time() - self._last_options_log) > 300:
+                print(f"📡 OPTIONS keep-alive sent")
+                self._last_options_log = time.time()
+        except Exception as e:
+            print(f"⚠️  Failed to send OPTIONS keep-alive: {e}")
+    
     async def _registration_refresh_loop(self):
         """Periodically refresh registration and check connection health."""
         while self.running:
@@ -319,13 +447,15 @@ class SIPClient:
                 refresh_threshold = self.last_registration_time + (lifetime * 0.8)
                 if current_time >= refresh_threshold:
                     print(f"🔄 Proactively refreshing registration (80% of expiry time reached)")
-                    await self.register()
+                    # Use auth if we have it (for refresh)
+                    await self.register(with_auth=(self.auth_realm is not None))
             # If we're registered but haven't refreshed recently, do a health check
             elif self.registered:
                 # If we haven't registered in the last 5 minutes, refresh
                 if not self.last_registration_time or (current_time - self.last_registration_time) > 300:
                     print(f"🔄 Periodic registration refresh (health check)")
-                    await self.register()
+                    # Use auth if we have it (for refresh)
+                    await self.register(with_auth=(self.auth_realm is not None))
             # If we're not registered, attempt reconnection
             elif not self.registered:
                 print(f"⚠️  Not registered, attempting reconnection...")
@@ -615,13 +745,35 @@ class SIPClient:
         # Determine message type
         if request_line.startswith("SIP/2.0"):
             # Response
-            status_code = int(request_line.split()[1])
-            reason = " ".join(request_line.split()[2:]) if len(request_line.split()) > 2 else ""
+            try:
+                status_code = int(request_line.split()[1])
+                reason = " ".join(request_line.split()[2:]) if len(request_line.split()) > 2 else ""
+            except (ValueError, IndexError):
+                print(f"⚠️  Invalid SIP response: {request_line}")
+                return
+            
+            # Extract Call-ID for response matching
+            call_id = headers.get("Call-ID", "")
             
             if status_code == 200:
                 # Check if this is a REGISTER response
                 cseq = headers.get("CSeq", "")
                 if "REGISTER" in cseq:
+                    # Extract CSeq number to match with pending registration
+                    try:
+                        cseq_num = int(cseq.split()[0])
+                    except (ValueError, IndexError):
+                        cseq_num = None
+                    
+                    # Cancel timeout for this registration
+                    if cseq_num is not None:
+                        pending_key = f"{call_id}:{cseq_num}"
+                        if pending_key in self.pending_registrations:
+                            pending_info = self.pending_registrations[pending_key]
+                            if "task" in pending_info and pending_info["task"]:
+                                pending_info["task"].cancel()
+                            del self.pending_registrations[pending_key]
+                    
                     # Parse Expires header to track registration lifetime
                     expires_header = headers.get("Expires", "3600")
                     try:
@@ -642,42 +794,122 @@ class SIPClient:
                     self.registered = True
                     # Reset reconnection attempts on successful registration
                     self.reconnect_attempts = 0
+                elif "OPTIONS" in cseq:
+                    # OPTIONS keep-alive response - connection is alive
+                    if not hasattr(self, '_last_options_log') or (time.time() - self._last_options_log) > 300:
+                        print(f"📡 OPTIONS keep-alive response received")
+                        self._last_options_log = time.time()
             elif status_code == 401:
                 # Extract digest authentication challenge
-                www_auth = headers.get("WWW-Authenticate", headers.get("Proxy-Authenticate", ""))
-                if www_auth and "Digest" in www_auth:
-                    print(f"⚠️  SIP Registration requires authentication (401 {reason})")
-                    print("   Extracting digest challenge...")
-                    
-                    # Parse digest challenge
-                    realm_match = re.search(r'realm="([^"]+)"', www_auth)
-                    nonce_match = re.search(r'nonce="([^"]+)"', www_auth)
-                    opaque_match = re.search(r'opaque="([^"]+)"', www_auth)
-                    
-                    if realm_match and nonce_match:
-                        self.auth_realm = realm_match.group(1)
-                        self.auth_nonce = nonce_match.group(1)
-                        self.auth_opaque = opaque_match.group(1) if opaque_match else None
+                cseq = headers.get("CSeq", "")
+                
+                # Handle OPTIONS 401 - extract auth and retry
+                if "OPTIONS" in cseq:
+                    www_auth = headers.get("WWW-Authenticate", headers.get("Proxy-Authenticate", ""))
+                    if www_auth and "Digest" in www_auth:
+                        # Parse digest challenge
+                        realm_match = re.search(r'realm="([^"]+)"', www_auth)
+                        nonce_match = re.search(r'nonce="([^"]+)"', www_auth)
+                        opaque_match = re.search(r'opaque="([^"]+)"', www_auth)
                         
-                        print(f"   Realm: {self.auth_realm}")
-                        print(f"   Retrying with digest authentication...")
+                        if realm_match and nonce_match:
+                            # Update auth info if we got new challenge
+                            self.auth_realm = realm_match.group(1)
+                            self.auth_nonce = nonce_match.group(1)
+                            self.auth_opaque = opaque_match.group(1) if opaque_match else None
+                            
+                            # Retry OPTIONS with auth (small delay to avoid rapid loops)
+                            print(f"📡 OPTIONS 401 received, retrying with authentication...")
+                            await asyncio.sleep(0.1)
+                            await self._send_options_keepalive()
+                    return
+                
+                if "REGISTER" in cseq:
+                    # Extract CSeq number to match with pending registration
+                    try:
+                        cseq_num = int(cseq.split()[0])
+                    except (ValueError, IndexError):
+                        cseq_num = None
+                    
+                    # Cancel timeout for this registration (we got a response, even if 401)
+                    if cseq_num is not None:
+                        pending_key = f"{call_id}:{cseq_num}"
+                        if pending_key in self.pending_registrations:
+                            pending_info = self.pending_registrations[pending_key]
+                            if "task" in pending_info and pending_info["task"]:
+                                pending_info["task"].cancel()
+                            # Don't delete yet - we'll retry with auth
+                    
+                    www_auth = headers.get("WWW-Authenticate", headers.get("Proxy-Authenticate", ""))
+                    if www_auth and "Digest" in www_auth:
+                        print(f"⚠️  SIP Registration requires authentication (401 {reason})")
+                        print("   Extracting digest challenge...")
                         
-                        # Retry registration with authentication (limit retries)
-                        self.auth_retry_count += 1
-                        if self.auth_retry_count < 3:  # Max 2 retries
-                            await asyncio.sleep(0.3)
-                            await self.register(with_auth=True)
+                        # Parse digest challenge
+                        realm_match = re.search(r'realm="([^"]+)"', www_auth)
+                        nonce_match = re.search(r'nonce="([^"]+)"', www_auth)
+                        opaque_match = re.search(r'opaque="([^"]+)"', www_auth)
+                        
+                        if realm_match and nonce_match:
+                            self.auth_realm = realm_match.group(1)
+                            self.auth_nonce = nonce_match.group(1)
+                            self.auth_opaque = opaque_match.group(1) if opaque_match else None
+                            
+                            print(f"   Realm: {self.auth_realm}")
+                            print(f"   Retrying with digest authentication...")
+                            
+                            # Clean up old pending registration
+                            if cseq_num is not None:
+                                pending_key = f"{call_id}:{cseq_num}"
+                                if pending_key in self.pending_registrations:
+                                    del self.pending_registrations[pending_key]
+                            
+                            # Retry registration with authentication (limit retries)
+                            self.auth_retry_count += 1
+                            if self.auth_retry_count < 3:  # Max 2 retries
+                                await asyncio.sleep(0.3)
+                                await self.register(with_auth=True)
+                            else:
+                                print("   ❌ Too many authentication attempts, giving up")
+                                # Clean up pending registration
+                                if cseq_num is not None:
+                                    pending_key = f"{call_id}:{cseq_num}"
+                                    if pending_key in self.pending_registrations:
+                                        del self.pending_registrations[pending_key]
                         else:
-                            print("   ❌ Too many authentication attempts, giving up")
+                            print("   ⚠️  Could not parse digest challenge")
                     else:
-                        print("   ⚠️  Could not parse digest challenge")
-                else:
-                    print(f"⚠️  SIP Registration requires authentication (401 {reason})")
-                    print("   Unknown authentication method")
+                        print(f"⚠️  SIP Registration requires authentication (401 {reason})")
+                        print("   Unknown authentication method")
             elif status_code >= 400:
                 # Check if this is a REGISTER response
                 cseq = headers.get("CSeq", "")
+                
+                # Handle OPTIONS errors gracefully (not critical for keep-alive)
+                if "OPTIONS" in cseq:
+                    # OPTIONS keep-alive got an error - log but don't treat as critical
+                    # The connection might still be alive, we just couldn't verify it this time
+                    if not hasattr(self, '_last_options_error_log') or (time.time() - self._last_options_error_log) > 300:
+                        print(f"📡 OPTIONS keep-alive: {status_code} response (non-critical)")
+                        self._last_options_error_log = time.time()
+                    return
+                
                 if "REGISTER" in cseq:
+                    # Extract CSeq number to match with pending registration
+                    try:
+                        cseq_num = int(cseq.split()[0])
+                    except (ValueError, IndexError):
+                        cseq_num = None
+                    
+                    # Cancel timeout for this registration (we got a response)
+                    if cseq_num is not None:
+                        pending_key = f"{call_id}:{cseq_num}"
+                        if pending_key in self.pending_registrations:
+                            pending_info = self.pending_registrations[pending_key]
+                            if "task" in pending_info and pending_info["task"]:
+                                pending_info["task"].cancel()
+                            del self.pending_registrations[pending_key]
+                    
                     print(f"❌ SIP Registration failed: {status_code} {reason}")
                     # Mark as unregistered on failure
                     if self.registered:

@@ -1,11 +1,11 @@
 name: "HA SIP Voice Assistant"
-version: "0.2.0"
+version: "0.2.1"
 slug: "ha_sip_voice_assistant"
 description: "SIP-to-AI voice assistant for Home Assistant with FritzBox integration"
 url: "https://github.com/fjfricke/ha-sip-voice-assistant"
 arch:
-  - armhf
-  - armv7
+  # - armhf
+  # - armv7
   - aarch64
   - amd64
 # Use pre-built images (recommended) - Home Assistant will replace {arch} with the appropriate architecture
