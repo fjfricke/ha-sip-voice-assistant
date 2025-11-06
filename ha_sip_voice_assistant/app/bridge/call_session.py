@@ -1,7 +1,8 @@
 """Call session management."""
 import asyncio
 import time
-import numpy as np
+import threading
+import concurrent.futures
 from typing import Dict, Any, Optional
 from app.config import Config
 from app.bridge.audio_adapter import AudioAdapter
@@ -11,13 +12,64 @@ from app.homeassistant.client import HomeAssistantClient
 from app.utils.pin_verification import PINVerifier
 from app.utils.caller_mapping import get_caller_settings
 
-# Try to import pyVoIP call object
+# Try to import PJSIP call object
 try:
-    from pyVoIP.VoIP import VoIPCall
-    PYVOIP_AVAILABLE = True
+    import pjsua2 as pj
+    PJSIP_AVAILABLE = True
 except ImportError:
-    PYVOIP_AVAILABLE = False
-    VoIPCall = None
+    PJSIP_AVAILABLE = False
+    pj = None
+
+
+class PJSIPThreadPool:
+    """Thread pool with PJSIP-registered threads."""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._executor = None
+        self._ep = None
+    
+    def initialize(self, ep, max_workers=2):
+        """Initialize the thread pool with PJSIP endpoint."""
+        self._ep = ep
+        
+        def worker_init():
+            """Initialize worker thread - register with PJSIP."""
+            try:
+                if self._ep:
+                    self._ep.libRegisterThread("PJSIPWorker")
+            except Exception:
+                pass  # Thread might already be registered
+        
+        # Create executor with custom initializer
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="PJSIPWorker",
+            initializer=worker_init
+        )
+    
+    def submit(self, fn, *args, **kwargs):
+        """Submit a task to the thread pool."""
+        if self._executor is None:
+            raise RuntimeError("Thread pool not initialized")
+        return self._executor.submit(fn, *args, **kwargs)
+    
+    def shutdown(self, wait=True):
+        """Shutdown the thread pool."""
+        if self._executor:
+            self._executor.shutdown(wait=wait)
 
 
 class CallSession:
@@ -46,7 +98,7 @@ class CallSession:
         
         # Components
         self.audio_adapter = AudioAdapter(sample_rate=sample_rate)
-        self.voip_call: Optional[VoIPCall] = call_info.get("voip_call") if PYVOIP_AVAILABLE else None
+        self.pjsip_call = call_info.get("pjsip_call") if PJSIP_AVAILABLE else None
         self.ai_client: Optional[OpenAIRealtimeClient] = None
         self.ha_client: Optional[HomeAssistantClient] = None
         self.tool_handler: Optional[ToolHandler] = None
@@ -60,6 +112,17 @@ class CallSession:
         
         # Transcription buffer for PIN verification
         self.transcription_buffer: str = ""
+        
+        # PJSIP thread pool (shared singleton)
+        self._pjsip_executor = None
+        if PJSIP_AVAILABLE and self.pjsip_call:
+            # Get endpoint from adapter
+            if hasattr(self.pjsip_call, 'adapter') and hasattr(self.pjsip_call.adapter, 'ep'):
+                if not hasattr(CallSession, '_pjsip_pool_initialized'):
+                    CallSession._pjsip_pool = PJSIPThreadPool()
+                    CallSession._pjsip_pool.initialize(self.pjsip_call.adapter.ep, max_workers=2)
+                    CallSession._pjsip_pool_initialized = True
+                self._pjsip_executor = CallSession._pjsip_pool
     
     async def start(self):
         """Start the call session."""
@@ -106,24 +169,82 @@ class CallSession:
         # Connect to OpenAI
         await self.ai_client.connect()
         
-        # Trigger OpenAI to start the conversation (instructions will guide the welcome message)
-        await asyncio.sleep(0.5)  # Small delay for session to be ready
-        await self.ai_client.request_response()
-        
-        # Answer the call if using pyVoIP
-        if self.voip_call:
+        # Answer the call FIRST if using PJSIP (before triggering OpenAI response)
+        # Must be done in a registered thread
+        if self.pjsip_call:
             try:
-                self.voip_call.answer()
-                print("✅ Answered pyVoIP call")
+                def _answer_call():
+                    """Answer call in PJSIP-registered thread."""
+                    try:
+                        if self._pjsip_executor and self._pjsip_executor._ep:
+                            # Register this thread if needed
+                            if not self._pjsip_executor._ep.libIsThreadRegistered():
+                                self._pjsip_executor._ep.libRegisterThread("AnswerCall")
+                        call_param = pj.CallOpParam()
+                        call_param.statusCode = pj.PJSIP_SC_OK
+                        self.pjsip_call.answer(call_param)
+                        return True
+                    except Exception as e:
+                        print(f"❌ Error in _answer_call: {e}")
+                        return False
+                
+                # Use executor if available, otherwise call directly (but this might fail)
+                if self._pjsip_executor and self._pjsip_executor._executor:
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        self._pjsip_executor._executor,
+                        _answer_call
+                    )
+                    if result:
+                        print("✅ Answered PJSIP call")
+                        
+                        # Wait for audio bridge to be ready (audio_running flag)
+                        # This ensures audio frames won't be lost
+                        max_wait = 5.0  # Maximum wait time in seconds
+                        wait_interval = 0.1  # Check every 100ms
+                        waited = 0.0
+                        while waited < max_wait:
+                            if hasattr(self.pjsip_call, 'audio_running') and self.pjsip_call.audio_running:
+                                break
+                            await asyncio.sleep(wait_interval)
+                            waited += wait_interval
+                        
+                        if waited >= max_wait:
+                            print("⚠️  Audio bridge not ready after waiting, continuing anyway")
+                        else:
+                            print("✅ Audio bridge ready")
+                else:
+                    # Fallback: try direct call (might fail if not in registered thread)
+                    call_param = pj.CallOpParam()
+                    call_param.statusCode = pj.PJSIP_SC_OK
+                    self.pjsip_call.answer(call_param)
+                    print("✅ Answered PJSIP call")
+                    
+                    # Wait for audio bridge
+                    max_wait = 5.0
+                    wait_interval = 0.1
+                    waited = 0.0
+                    while waited < max_wait:
+                        if hasattr(self.pjsip_call, 'audio_running') and self.pjsip_call.audio_running:
+                            break
+                        await asyncio.sleep(wait_interval)
+                        waited += wait_interval
+                    
+                    if waited < max_wait:
+                        print("✅ Audio bridge ready")
             except Exception as e:
                 print(f"❌ Error answering call: {e}")
                 import traceback
                 traceback.print_exc()
         
+        # Trigger OpenAI to start the conversation (instructions will guide the welcome message)
+        # Now that call is answered and audio bridge is ready, we can safely request response
+        await asyncio.sleep(0.2)  # Small delay for session to be ready
+        await self.ai_client.request_response()
+        
         # Start audio streaming tasks
-        # Uplink: pyVoIP call -> AudioAdapter -> OpenAI
+        # Uplink: PJSIP call -> AudioAdapter -> OpenAI
         self.uplink_task = asyncio.create_task(self._uplink_loop())
-        # Downlink: OpenAI -> AudioAdapter -> pyVoIP call
+        # Downlink: OpenAI -> AudioAdapter -> PJSIP call
         self.downlink_task = asyncio.create_task(self._downlink_loop())
         self.ai_receive_task = asyncio.create_task(self._ai_receive_loop())
     
@@ -153,13 +274,42 @@ class CallSession:
             except asyncio.CancelledError:
                 pass
         
-        # Hangup call if using pyVoIP
-        if self.voip_call:
+        # Hangup call if using PJSIP
+        # Must be done in a registered thread
+        if self.pjsip_call:
             try:
-                self.voip_call.hangup()
-                print("✅ Hung up pyVoIP call")
+                def _hangup_call():
+                    """Hangup call in PJSIP-registered thread."""
+                    try:
+                        if self._pjsip_executor and self._pjsip_executor._ep:
+                            # Register this thread if needed
+                            if not self._pjsip_executor._ep.libIsThreadRegistered():
+                                self._pjsip_executor._ep.libRegisterThread("HangupCall")
+                        call_param = pj.CallOpParam()
+                        call_param.statusCode = pj.PJSIP_SC_DECLINE
+                        self.pjsip_call.hangup(call_param)
+                        return True
+                    except Exception as e:
+                        print(f"⚠️  Error in _hangup_call: {e}")
+                        return False
+                
+                # Use executor if available
+                if self._pjsip_executor and self._pjsip_executor._executor:
+                    await asyncio.get_event_loop().run_in_executor(
+                        self._pjsip_executor._executor,
+                        _hangup_call
+                    )
+                    print("✅ Hung up PJSIP call")
+                else:
+                    # Fallback: try direct call
+                    call_param = pj.CallOpParam()
+                    call_param.statusCode = pj.PJSIP_SC_DECLINE
+                    self.pjsip_call.hangup(call_param)
+                    print("✅ Hung up PJSIP call")
             except Exception as e:
                 print(f"⚠️  Error hanging up call: {e}")
+                import traceback
+                traceback.print_exc()
         
         if self.ai_client:
             await self.ai_client.disconnect()
@@ -265,7 +415,7 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
     
     async def _uplink_loop(self):
         """
-        Loop: Read from pyVoIP call, convert via AudioAdapter, send to OpenAI.
+        Loop: Read from PJSIP call, convert via AudioAdapter, send to OpenAI.
         Using AudioAdapter which worked in the original implementation.
         """
         frame_interval = 0.02  # 20ms
@@ -274,39 +424,18 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
             try:
                 loop_start = time.time()
                 
-                # Read audio from pyVoIP call (160 bytes = 20ms at 8kHz, 8-bit PCM)
-                if self.voip_call:
+                # Read audio from PJSIP call
+                # PJSIP provides PCM16 at 8kHz (320 bytes = 20ms)
+                if self.pjsip_call:
                     try:
-                        # Read audio in executor since pyVoIP is synchronous
-                        # Use blocking=True to ensure we get complete frames
-                        audio_8bit = await asyncio.get_event_loop().run_in_executor(
-                            None, 
-                            lambda: self.voip_call.read_audio(length=160, blocking=True)
-                        )
+                        # Direct queue access - queue operations are thread-safe and don't call PJSIP
+                        audio_pcm16 = self.pjsip_call.get_audio_frame(blocking=False)
                         
-                        if audio_8bit and len(audio_8bit) == 160:
-                            # Convert 8-bit unsigned PCM to 16-bit signed PCM
-                            # pyVoIP uses 8-bit unsigned (0-255), we need 16-bit signed (-32768 to 32767)
-                            # Method: Convert 8-bit to 16-bit by scaling and centering
-                            samples_8bit = np.frombuffer(audio_8bit, dtype=np.uint8)
-                            # Convert: 0-255 -> -32768 to 32767
-                            # Formula: (sample - 128) * 256
-                            samples_16bit = ((samples_8bit.astype(np.int16) - 128) * 256).astype(np.int16)
-                            pcm16_8k = samples_16bit.tobytes()
-                            
-                            # Verify: 160 samples * 2 bytes = 320 bytes
-                            if len(pcm16_8k) != 320:
-                                print(f"⚠️  Unexpected PCM16 size: {len(pcm16_8k)} bytes (expected 320)")
-                                # Pad or truncate
-                                if len(pcm16_8k) < 320:
-                                    pcm16_8k = pcm16_8k + b'\x00' * (320 - len(pcm16_8k))
-                                else:
-                                    pcm16_8k = pcm16_8k[:320]
-                            
-                            # Send to audio adapter (will resample to 24kHz for OpenAI)
-                            await self.audio_adapter.send_uplink(pcm16_8k)
+                        if audio_pcm16 and len(audio_pcm16) == 320:
+                            # PJSIP already provides PCM16, so send directly to adapter
+                            await self.audio_adapter.send_uplink(audio_pcm16)
                         else:
-                            # Send silence
+                            # Send silence if no audio
                             await self.audio_adapter.send_uplink(b'\x00' * 320)
                     except Exception as e:
                         # Call might have ended
@@ -314,7 +443,7 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
                         self.running = False
                         break
                 else:
-                    # No voip_call, send silence
+                    # No pjsip_call, send silence
                     await self.audio_adapter.send_uplink(b'\x00' * 320)
                 
                 # Get audio data from adapter (resampled to 24kHz)
@@ -339,7 +468,7 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
     
     async def _downlink_loop(self):
         """
-        Loop: Read from AudioAdapter, convert to 8-bit PCM, write to pyVoIP call.
+        Loop: Read from AudioAdapter, write PCM16 to PJSIP call.
         Using AudioAdapter which worked in the original implementation.
         """
         frame_interval = 0.02  # 20ms
@@ -351,32 +480,13 @@ IMPORTANT: Some tools require PIN authentication. When calling a tool that requi
                 # Get audio from adapter (already at 8kHz PCM16, 320 bytes = 20ms)
                 pcm16_data = await self.audio_adapter.get_downlink()
                 
-                if self.voip_call and pcm16_data and len(pcm16_data) == 320:
+                if self.pjsip_call and pcm16_data and len(pcm16_data) == 320:
                     try:
-                        # Convert 16-bit signed PCM to 8-bit unsigned PCM
-                        # pyVoIP expects 8-bit unsigned (0-255)
-                        # Formula: (sample / 256) + 128
-                        samples_16bit = np.frombuffer(pcm16_data, dtype=np.int16)
-                        # Convert: -32768 to 32767 -> 0-255
-                        samples_8bit = np.clip((samples_16bit // 256) + 128, 0, 255).astype(np.uint8)
-                        audio_8bit = samples_8bit.tobytes()
-                        
-                        # Verify frame size (should be 160 bytes for 20ms at 8kHz)
-                        if len(audio_8bit) != 160:
-                            print(f"⚠️  Unexpected 8-bit PCM frame size: {len(audio_8bit)} bytes (expected 160)")
-                            # Pad or truncate to correct size
-                            if len(audio_8bit) < 160:
-                                audio_8bit = audio_8bit + b'\x80' * (160 - len(audio_8bit))  # 0x80 = silence
-                            else:
-                                audio_8bit = audio_8bit[:160]
-                        
-                        # Write to pyVoIP call in executor (synchronous call)
-                        await asyncio.get_event_loop().run_in_executor(
-                            None,
-                            lambda: self.voip_call.write_audio(audio_8bit)
-                        )
+                        # Direct queue access - queue operations are thread-safe and don't call PJSIP
+                        # PJSIP expects PCM16, so we can send directly
+                        self.pjsip_call.put_audio_frame(pcm16_data)
                     except Exception as e:
-                        print(f"⚠️  Error converting/writing audio: {e}")
+                        print(f"⚠️  Error writing audio: {e}")
                         import traceback
                         traceback.print_exc()
                 

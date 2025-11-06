@@ -5,7 +5,7 @@ import sys
 import argparse
 from typing import Dict, Any, Optional
 from app.config import Config
-from app.sip.pyvoip_adapter import PyVoIPAdapter
+from app.sip.pjsip_adapter import PJSIPAdapter
 from app.bridge.call_session import CallSession
 
 
@@ -14,7 +14,7 @@ class Application:
     
     def __init__(self):
         self.config = Config()
-        self.sip_client: Optional[PyVoIPAdapter] = None
+        self.sip_client: Optional[PJSIPAdapter] = None
         self.active_sessions: Dict[str, CallSession] = {}
         self.running = False
         self._shutdown_requested = False
@@ -49,10 +49,10 @@ class Application:
         print("Loading configuration...")
         self.config.load()
         
-        print("Starting SIP client (pyVoIP)...")
+        print("Starting SIP client (PJSIP)...")
         sip_config = self.config.get_sip_config()
         
-        self.sip_client = PyVoIPAdapter(
+        self.sip_client = PJSIPAdapter(
             server=sip_config["server"],
             username=sip_config["username"],
             password=sip_config["password"],
@@ -66,7 +66,7 @@ class Application:
         await self.sip_client.start()
         self.running = True
         
-        print("SIP client (pyVoIP) started. Waiting for calls...")
+        print("SIP client (PJSIP) started. Waiting for calls...")
         print(f"Registered as: {sip_config['username']}@{sip_config['server']}")
         
         # Wait a moment to see registration result
