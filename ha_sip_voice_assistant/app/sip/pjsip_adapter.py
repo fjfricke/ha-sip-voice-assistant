@@ -260,6 +260,10 @@ class PJSIPCall(pj.Call):
                         self.audio_running = True
                         self.audio_port = aud_med  # Store for audio bridge
                         print(f"✅ Audio stream active for call {ci.callIdString}")
+
+                        # Ensure there is a consumer pulling audio frames (important in headless mode)
+                        pb = self.adapter.ep.audDevManager().getPlaybackDevMedia()
+                        aud_med.startTransmit(pb)
                         
                         # Create custom AudioMediaPort for bridging
                         try:
@@ -355,7 +359,38 @@ class PJSIPAdapter:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
     
     def _get_local_ip(self) -> str:
-        """Get local IP address."""
+        def try_target(host: str, port: int) -> Optional[str]:
+            try:
+                # Prefer IPv4, then IPv6
+                infos = socket.getaddrinfo(host, port, 0, socket.SOCK_DGRAM)
+                # Sort so AF_INET (IPv4) comes first
+                infos.sort(key=lambda x: 0 if x[0] == socket.AF_INET else 1)
+                for family, socktype, proto, _, sockaddr in infos:
+                    try:
+                        s = socket.socket(family, socket.SOCK_DGRAM)
+                        s.connect(sockaddr)
+                        ip = s.getsockname()[0]
+                        s.close()
+                        return ip
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return None
+
+        # 1) Try the configured SIP server (best: on-LAN registrar like fritz.box)
+        ip = try_target(self.server, getattr(self, "server_port", 5060))
+        if ip:
+            return ip
+
+        # 2) Optional: a LAN hint host (expose as config if you like)
+        lan_hint = getattr(self, "lan_hint_host", None)
+        if lan_hint:
+            ip = try_target(lan_hint, getattr(self, "server_port", 5060))
+            if ip:
+                return ip
+
+        # 3) Last resort: generic route chooser
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -383,6 +418,7 @@ class PJSIPAdapter:
             
             # Initialize endpoint (must be done before thread registration)
             self.ep.libInit(ep_cfg)
+            self.ep.audDevManager().setNullDev()
             
             # Register this thread with PJSIP (after libInit, before other operations)
             # Check if thread is already registered to avoid "re-registering" error
